@@ -98,6 +98,33 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx1g" \
 
 Output Arrow IPC files are written to `src/main/resources/output/`.
 
+### Git LFS for Large Files
+
+The sample XML files (up to 760 MB) and Arrow IPC output files are tracked using **Git Large File Storage (Git LFS)** to avoid bloating the repository:
+
+```bash
+# Install Git LFS (if not already installed)
+# macOS: brew install git-lfs
+# Ubuntu: sudo apt-get install git-lfs
+
+# Initialize in the repository (already done)
+git lfs install
+
+# Files are tracked via .gitattributes:
+# - src/main/resources/sample-data/*.xml
+# - src/main/resources/output/*.arrow
+```
+
+When you clone this repository, Git LFS will automatically download the large files. If you want to skip them:
+
+```bash
+# Clone without downloading LFS files
+GIT_LFS_SKIP_SMUDGE=1 git clone <repo-url>
+
+# Generate the sample files yourself
+mvn exec:java -Dexec.args="generate"
+```
+
 ---
 
 ## Study Results

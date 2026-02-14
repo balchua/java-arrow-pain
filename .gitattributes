@@ -1,0 +1,2 @@
+src/main/resources/sample-data/*.xml filter=lfs diff=lfs merge=lfs -text
+src/main/resources/output/*.arrow filter=lfs diff=lfs merge=lfs -text

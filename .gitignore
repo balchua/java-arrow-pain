@@ -1,1 +1,7 @@
 target/
+
+# Large generated sample data (regenerate with: mvn exec:java -Dexec.args="generate")
+src/main/resources/sample-data/pain001_type_*.xml
+
+# Arrow IPC output files
+src/main/resources/output/*.arrow

@@ -98,32 +98,28 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx1g" \
 
 Output Arrow IPC files are written to `src/main/resources/output/`.
 
-### Git LFS for Large Files
+### Sample Data Files
 
-The sample XML files (up to 760 MB) and Arrow IPC output files are tracked using **Git Large File Storage (Git LFS)** to avoid bloating the repository:
-
-```bash
-# Install Git LFS (if not already installed)
-# macOS: brew install git-lfs
-# Ubuntu: sudo apt-get install git-lfs
-
-# Initialize in the repository (already done)
-git lfs install
-
-# Files are tracked via .gitattributes:
-# - src/main/resources/sample-data/*.xml
-# - src/main/resources/output/*.arrow
-```
-
-When you clone this repository, Git LFS will automatically download the large files. If you want to skip them:
+The large XML test files (up to 1.9 GB formatted) are **not included in the repository**. Generate them locally:
 
 ```bash
-# Clone without downloading LFS files
-GIT_LFS_SKIP_SMUDGE=1 git clone <repo-url>
-
-# Generate the sample files yourself
+# Generate all 3 large sample files
 mvn exec:java -Dexec.args="generate"
+
+# This creates:
+# - pain001_type_a_1x1M.xml (387 MB minified, 957 MB formatted)
+# - pain001_type_b_2x500K.xml (387 MB minified, 957 MB formatted)  
+# - pain001_type_c_1Mx1.xml (760 MB minified, 1.9 GB formatted)
 ```
+
+The generated files are one-line XML (minified). To format them for readability:
+
+```bash
+# Format XML files with proper indentation
+python3 format_xml.py src/main/resources/sample-data/*.xml
+```
+
+**Note:** Formatted files are 2.5× larger due to indentation but much easier to read with `cat`, `head`, or `less`.
 
 ---
 

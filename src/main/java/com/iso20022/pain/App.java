@@ -70,11 +70,18 @@ public final class App {
         LOG.info("═══════════════════════════════════════════════════════════════");
 
         try {
-            if (args.length > 0 && "generate".equalsIgnoreCase(args[0])) {
+            if (args.length > 0 && "generate-formatted".equalsIgnoreCase(args[0])) {
+                // ── Generate formatted (pretty-printed) XML ─────────────────
+                LOG.info("");
+                LOG.info("Mode: generate pretty-printed sample files only");
+                generateSampleFiles(true);
+                LOG.info("Generation complete (formatted).");
+
+            } else if (args.length > 0 && "generate".equalsIgnoreCase(args[0])) {
                 // ── Generate-only mode ──────────────────────────────────────
                 LOG.info("");
                 LOG.info("Mode: generate sample files only");
-                generateSampleFiles();
+                generateSampleFiles(false);
                 LOG.info("Generation complete.");
 
             } else if (args.length > 0) {
@@ -93,7 +100,7 @@ public final class App {
                 LOG.info("");
                 LOG.info("Phase 1: Generating pain.001.001.09 sample XML files");
                 LOG.info("─────────────────────────────────────────────────────────");
-                List<Path> generatedFiles = generateSampleFiles();
+                List<Path> generatedFiles = generateSampleFiles(false);
 
                 LOG.info("");
                 LOG.info("Phase 2: Parsing XML → Apache Arrow (with benchmarking)");
@@ -114,12 +121,12 @@ public final class App {
 
     // ─── File generation ─────────────────────────────────────────────────────
 
-    private static List<Path> generateSampleFiles() {
+    private static List<Path> generateSampleFiles(boolean prettyPrint) {
         return FILE_SPECS.stream()
                 .map(spec -> {
                     try {
                         Instant start = Instant.now();
-                        Path path = Pain001XmlGenerator.generate(spec, SAMPLE_DATA_DIR);
+                        Path path = Pain001XmlGenerator.generate(spec, SAMPLE_DATA_DIR, prettyPrint);
                         Duration elapsed = Duration.between(start, Instant.now());
                         LOG.info("  ✓ {} ready in {}", spec.fileName(), fmt(elapsed));
                         return path;

@@ -65,16 +65,25 @@ public final class Pain001XmlGenerator {
     }
 
     /**
+     * Generates a pain.001.001.09 XML file (compact / minified).
+     */
+    public static Path generate(SampleFileSpec spec, Path outputDir)
+            throws IOException, XMLStreamException {
+        return generate(spec, outputDir, false);
+    }
+
+    /**
      * Generates a pain.001.001.09 XML file based on the given specification.
      *
-     * @param spec      the file specification (number of payment blocks and
-     *                  transactions)
-     * @param outputDir the directory where the file will be written
+     * @param spec        the file specification (number of payment blocks and
+     *                    transactions)
+     * @param outputDir   the directory where the file will be written
+     * @param prettyPrint if {@code true}, the XML output will be indented (2-space)
      * @return the path of the generated file
      * @throws IOException        if an I/O error occurs
      * @throws XMLStreamException if an XML writing error occurs
      */
-    public static Path generate(SampleFileSpec spec, Path outputDir)
+    public static Path generate(SampleFileSpec spec, Path outputDir, boolean prettyPrint)
             throws IOException, XMLStreamException {
 
         Files.createDirectories(outputDir);
@@ -96,7 +105,8 @@ public final class Pain001XmlGenerator {
         try (OutputStream fileOut = new BufferedOutputStream(
                 Files.newOutputStream(outputFile), 1024 * 1024)) {
 
-            XMLStreamWriter writer = factory.createXMLStreamWriter(fileOut, "UTF-8");
+            XMLStreamWriter raw = factory.createXMLStreamWriter(fileOut, "UTF-8");
+            XMLStreamWriter writer = prettyPrint ? new IndentingXMLStreamWriter(raw) : raw;
             try {
                 writeDocument(writer, spec);
             } finally {

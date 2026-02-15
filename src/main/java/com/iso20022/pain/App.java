@@ -6,7 +6,8 @@ import com.iso20022.pain.benchmark.LoadBenchmark;
 import com.iso20022.pain.generator.Pain001XmlGenerator;
 import com.iso20022.pain.generator.SampleFileSpec;
 import com.iso20022.pain.parser.Pain001StaxParser;
-import com.iso20022.pain.validation.ControlSumValidator;
+import com.iso20022.pain.validation.ValidationContext;
+import com.iso20022.pain.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.slf4j.Logger;
@@ -178,17 +179,36 @@ public final class App {
 
                     result.printSummary();
 
-                    // ── Validate control sums (Arrow iteration) ────────
+                    // ── Validate using chainable validators ────────────────────
                     LOG.info("");
-                    LOG.info("Validating control sums (Arrow in-memory scan)...");
+                    LOG.info("Validating with chained validators...");
                     Instant valStart = Instant.now();
-                    ControlSumValidator.ValidationResult valResult = ControlSumValidator.validate(result);
+
+                    ValidationContext valContext = ValidationPipeline.standard()
+                        .execute(result);
+
                     Duration valDuration = Duration.between(valStart, Instant.now());
-                    benchmark.recordPhase("CtrlSum Validate", valDuration);
-                    benchmark.setValidationResult(valResult.valid(),
-                            valResult.remittancesChecked(),
-                            valResult.transactionsScanned(),
-                            valResult.errors());
+                    benchmark.recordPhase("Validation", valDuration);
+
+                    if (valContext.hasErrors()) {
+                        LOG.warn("✗ Validation failed with {} error(s)", valContext.getErrors().size());
+                        valContext.getErrors().stream()
+                            .limit(10)
+                            .forEach(err -> LOG.warn("  • [{}] {}: {}", 
+                                err.validator(), err.message(), 
+                                err.details().length > 0 ? err.details()[0] : ""));
+                        benchmark.setValidationResult(false, 0, 0, valContext.getErrors().size());
+                    } else {
+                        LOG.info("✓ All validations passed (4 validators, {} ms)", 
+                            valContext.getElapsedMillis());
+                        benchmark.setValidationResult(true, 
+                                result.getRemittanceRowCount(),
+                                result.getTransactionRowCount(), 0);
+                    }
+
+                    if (!valContext.getWarnings().isEmpty()) {
+                        LOG.info("⚠ {} warning(s)", valContext.getWarnings().size());
+                    }
 
                     // ── Write Arrow IPC files ────────────────────────────
                     Instant writeStart = Instant.now();

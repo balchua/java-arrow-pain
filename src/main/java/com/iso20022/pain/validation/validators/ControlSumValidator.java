@@ -1,7 +1,9 @@
-package com.iso20022.pain.validation;
+package com.iso20022.pain.validation.validators;
 
 import com.iso20022.pain.arrow.ArrowBatchResult;
 import com.iso20022.pain.arrow.Pain001ArrowSchema;
+import com.iso20022.pain.validation.ValidationContext;
+import com.iso20022.pain.validation.Validator;
 import org.apache.arrow.vector.DecimalVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -33,16 +35,15 @@ import java.util.Map;
  * All iteration happens over Arrow off-heap vectors — no XML re-parsing.
  * This lets you benchmark how fast Arrow columnar scans are.
  * </p>
+ * 
+ * <p>This validator is not parallelizable as it must run after other validators complete.</p>
  */
-public final class ControlSumValidator {
+public final class ControlSumValidator implements Validator {
 
     private static final Logger LOG = LoggerFactory.getLogger(ControlSumValidator.class);
 
-    private ControlSumValidator() {
-    }
-
     /**
-     * Result record for the validation.
+     * Result record for the validation (for backward compatibility).
      *
      * @param valid               true if all control sums match
      * @param remittancesChecked  number of remittance rows checked
@@ -58,13 +59,35 @@ public final class ControlSumValidator {
             List<String> details) {
     }
 
+    @Override
+    public void validate(ArrowBatchResult result, ValidationContext context) {
+        ValidationResult valResult = performValidation(result, context);
+        LOG.debug("{} completed: {} remittances, {} transactions, {} errors", 
+                getName(), valResult.remittancesChecked, 
+                valResult.transactionsScanned, valResult.errors);
+    }
+
+    @Override
+    public boolean isParallelizable() {
+        return false;
+    }
+
+    @Override
+    public String getName() {
+        return "ControlSumValidator";
+    }
+
     /**
-     * Validates the control sums in the given Arrow result.
+     * Validates the control sums in the given Arrow result (legacy method for backward compatibility).
      *
      * @param result the three Arrow tables (message, remittance, transaction)
      * @return a {@link ValidationResult}
      */
     public static ValidationResult validate(ArrowBatchResult result) {
+        return new ControlSumValidator().performValidation(result, null);
+    }
+
+    private ValidationResult performValidation(ArrowBatchResult result, ValidationContext context) {
 
         // ─── Step 1: sum transaction amounts per pmt_inf_id ─────────────
         // Scan every transaction batch, accumulate BigDecimal sums
@@ -120,6 +143,9 @@ public final class ControlSumValidator {
                                 pmtInfId, declaredSum.toPlainString(),
                                 actualScaled.toPlainString());
                         errors.add(msg);
+                        if (context != null) {
+                            context.addError(getName(), msg, pmtInfId);
+                        }
                         if (errorCount <= 5) {
                             LOG.warn("  ✗ {}", msg);
                         }
@@ -149,6 +175,9 @@ public final class ControlSumValidator {
                         "Message CtrlSum mismatch: declared=%s, sum_of_remittances=%s",
                         msgCtrlSum.toPlainString(), grandScaled.toPlainString());
                 errors.add(msg);
+                if (context != null) {
+                    context.addError(getName(), msg);
+                }
                 LOG.warn("  ✗ {}", msg);
             }
         }

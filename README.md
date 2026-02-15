@@ -8,7 +8,7 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
 
 | Component    | Version                                           |
 | ------------ | ------------------------------------------------- |
-| Java         | 17                                                |
+| Java         | 21 (with virtual thread support)                 |
 | Apache Arrow | 15.0.2 (`arrow-vector`, `arrow-memory-unsafe`)    |
 | XML Parser   | StAX (`javax.xml.stream`) — streaming pull parser |
 | Build        | Maven 3.9.6                                       |
@@ -25,9 +25,16 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
                                        │ columnar scan
                                        ▼
                               ┌──────────────────┐
-                              │  CtrlSum          │
-                              │  Validation       │
+                              │  Validation      │
+                              │  Pipeline        │
+                              │  (4 validators)  │
                               └──────────────────┘
+                                  │
+                                  ├─ MessageValidator ──────┐
+                                  ├─ RemittanceValidator ───┤ Parallel
+                                  ├─ TransactionValidator ──┘ (virtual threads)
+                                  │
+                                  └─ ControlSumValidator ───── Sequential
 ```
 
 The XML is parsed in a **single streaming pass** directly into three relational Arrow tables:
@@ -60,7 +67,18 @@ src/main/java/com/iso20022/pain/
 │   ├── IndentingXMLStreamWriter.java  # Pretty-printing decorator for XMLStreamWriter
 │   └── SampleFileSpec.java           # Test file specifications (Type A/B/C)
 ├── validation/
-│   └── ControlSumValidator.java      # Validates control sums by scanning Arrow vectors
+│   ├── Validator.java                # Base interface for all validators
+│   ├── ValidationContext.java        # Thread-safe error/warning collection
+│   ├── ValidationPipeline.java       # Fluent builder with virtual thread support
+│   ├── ExecutionMode.java            # SEQUENTIAL, PARALLEL, AUTO modes
+│   ├── ChainedValidator.java         # andThen() implementation
+│   ├── VirtualThreadValidator.java   # Abstract base for batch-level parallelism
+│   └── validators/
+│       ├── MessageValidator.java     # Validates message-level fields
+│       ├── RemittanceValidator.java  # Validates IBAN, payment methods
+│       ├── TransactionValidator.java # Validates amounts, creditor names
+│       ├── ControlSumValidator.java  # Validates control sums (refactored)
+│       └── ParallelTransactionValidator.java  # Batch-parallel transaction validator
 └── benchmark/
     └── LoadBenchmark.java            # Timing, memory tracking, formatted report
 ```
@@ -81,7 +99,7 @@ Type C is intentionally adversarial — it maximises remittance-level overhead (
 ## Running
 
 ```bash
-# Prerequisites: Java 17+, Maven 3.9+
+# Prerequisites: Java 21+, Maven 3.9+
 
 # Generate all 3 sample XML files + parse + validate + export
 mvn exec:java
@@ -98,6 +116,9 @@ mvn exec:java -Dexec.args="generate-formatted"
 # Run with constrained heap (1 GB)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx1g" \
   mvn exec:java -Dexec.args="src/main/resources/sample-data/pain001_type_a_1x1M.xml"
+
+# Run validation test suite (recommended for comparison)
+./run_validation_tests.sh
 ```
 
 Output Arrow IPC files are written to `src/main/resources/output/`.
@@ -118,6 +139,65 @@ mvn exec:java -Dexec.args="generate-formatted"
 ```
 
 Formatted XML is recommended for testing since real-world client files are often pretty-printed. The parser handles both formats with identical correctness and comparable throughput.
+
+## Validation Framework
+
+The project includes a **chainable validation framework** with support for parallel execution using Java 21 virtual threads. The framework validates ISO 20022 compliance beyond just control sums.
+
+### Architecture
+
+```
+ValidationPipeline
+├─ MessageValidator      (parallel)  ─┐
+├─ RemittanceValidator   (parallel)  ─┤ Execute concurrently
+├─ TransactionValidator  (parallel)  ─┘ with virtual threads
+└─ ControlSumValidator   (sequential) ─ Runs after parallel group
+```
+
+### Validators
+
+1. **MessageValidator** — Validates message-level fields
+   - MsgId length ≤ 35 characters
+   - InitgPty (Initiating Party) presence
+   - CreDtTm (Creation DateTime) required
+
+2. **RemittanceValidator** — Validates payment instruction fields
+   - IBAN format: `^[A-Z]{2}[0-9]{2}[A-Z0-9]+$`
+   - Payment method required
+
+3. **TransactionValidator** — Validates transaction fields
+   - Amount must be positive
+   - Creditor name required
+
+4. **ControlSumValidator** — Validates ISO 20022 control sums
+   - Remittance-level control sum validation
+   - Message-level control sum validation
+
+### Usage
+
+```java
+// Standard pipeline with all validators
+ValidationContext ctx = ValidationPipeline.standard()
+    .execute(arrowBatchResult);
+
+// Custom pipeline
+ValidationContext ctx = ValidationPipeline.create()
+    .add(new MessageValidator())
+    .add(new RemittanceValidator())
+    .withExecutionMode(ExecutionMode.PARALLEL)
+    .execute(arrowBatchResult);
+
+// Manual chaining
+Validator chain = new MessageValidator()
+    .andThen(new RemittanceValidator())
+    .andThen(new ControlSumValidator());
+```
+
+### Performance
+
+The validation framework adds **172-864 ms** to the pipeline (compared to control sum validation alone) depending on dataset size. This is 1-2% of total pipeline time. The additional time buys comprehensive validation coverage and extensibility.
+
+See [TEST_RESULTS.md](TEST_RESULTS.md) for detailed performance comparison and test methodology.
 
 ---
 

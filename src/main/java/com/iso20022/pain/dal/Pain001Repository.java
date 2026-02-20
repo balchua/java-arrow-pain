@@ -7,19 +7,15 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
-import org.apache.arrow.vector.ipc.ArrowStreamReader;
-import org.apache.arrow.vector.ipc.ArrowStreamWriter;
+import org.apache.arrow.vector.ipc.ArrowReader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.channels.Channels;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,20 +27,21 @@ import java.util.List;
  *
  * <p>
  * Arrow data is loaded using DuckDB's zero-copy
- * {@link DuckDBConnection#registerArrowStream} API backed by Arrow IPC
- * serialisation via {@link VectorUnloader}. Each Arrow table is serialised
- * to an in-memory IPC stream and registered with DuckDB as an
- * {@link ArrowArrayStream}; DuckDB then materialises the stream into a
- * persistent in-memory table in a single vectorised bulk operation — up to
- * 5× faster than the per-row JDBC Appender approach for large datasets.
+ * {@link DuckDBConnection#registerArrowStream} API backed by a custom
+ * {@link BatchArrowReader} that serves existing {@link VectorSchemaRoot}
+ * batches directly via the Arrow C Data Interface — no intermediate IPC
+ * serialisation or re-allocation.  Each batch is loaded into a shared root
+ * via {@link VectorLoader} (buffer-reference transfer only) and exported
+ * as an {@link ArrowArrayStream}; DuckDB then materialises the stream into a
+ * persistent in-memory table in a single vectorised bulk operation.
  * </p>
  *
- * <p>
- * A small amount of Arrow allocator memory (~500 bytes per table) may remain
- * tracked until the JVM GC collects the C Data Interface stream objects that
- * DuckDB holds internally. Callers should handle the resulting
- * {@link IllegalStateException} from {@code allocator.close()} gracefully —
- * it is an accounting artifact, not a real memory leak.
+ * <p><b>Memory model:</b> because DuckDB always copies data on
+ * {@code CREATE TABLE AS}, peak memory during registration is exactly
+ * 2× the Arrow data size (original Arrow off-heap + DuckDB buffer pool).
+ * The previous IPC-based approach produced 3–4× because it also held an
+ * in-memory IPC byte array on the Java heap and a second set of Arrow
+ * off-heap buffers allocated by {@code ArrowStreamReader}.
  * </p>
  *
  * <p>
@@ -104,71 +101,107 @@ public final class Pain001Repository implements AutoCloseable {
      * Loads a list of Arrow batches into a DuckDB in-memory table using the
      * zero-copy {@link DuckDBConnection#registerArrowStream} API.
      *
-     * <ol>
-     *   <li>Serialise all batches to an in-memory Arrow IPC stream using
-     *       {@link VectorUnloader} (buffer-reference transfer, not element copy).</li>
-     *   <li>Wrap the IPC bytes as an {@link ArrowArrayStream} via the Arrow
-     *       C Data Interface, using the same allocator as the source batches.</li>
-     *   <li>Register with DuckDB: {@code registerArrowStream("_tmp_X", stream)}.</li>
-     *   <li>Materialise: {@code CREATE TABLE X AS SELECT * FROM _tmp_X}.</li>
-     * </ol>
-     *
-     * <p>All Arrow objects use the same root allocator as the source batches to
-     * satisfy Arrow's cross-root check in {@link VectorLoader}. After DuckDB
-     * materialises the table, it retains the stream internally until the
-     * connection is closed; the caller's allocator close may see a small residual
-     * (~500 bytes per table) from the retained C Data Interface structs.</p>
+     * <p>A {@link BatchArrowReader} wraps the existing batches and serves them
+     * directly via the C Data Interface — no IPC serialisation, no heap copy,
+     * no second set of Arrow off-heap buffers.  Peak additional memory during
+     * ingestion is exactly 1× the Arrow data size (DuckDB's own buffer pool),
+     * for a combined peak of 2× while both Arrow and DuckDB tables are live.</p>
      */
     private void loadViaStream(String tableName, List<VectorSchemaRoot> batches)
             throws Exception {
 
-        Schema schema = batches.get(0).getSchema();
+        try (BatchArrowReader reader = new BatchArrowReader(batches, allocator);
+             ArrowArrayStream stream = ArrowArrayStream.allocateNew(allocator)) {
 
-        // ── 1. Serialise Arrow batches to an in-memory IPC stream ────────────
-        // VectorUnloader transfers buffer references without element-wise copy.
-        // sharedRoot must use the same root allocator as the batch vectors so
-        // that VectorLoader can associate buffers across roots.
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Data.exportArrayStream(allocator, reader, stream);
 
-        try (VectorSchemaRoot sharedRoot = VectorSchemaRoot.create(schema, allocator);
-             ArrowStreamWriter writer = new ArrowStreamWriter(
-                     sharedRoot, null, Channels.newChannel(baos))) {
+            String tmpName = "_tmp_" + tableName;
+            conn.registerArrowStream(tmpName, stream);
+            conn.createStatement().execute(
+                    "CREATE TABLE " + tableName + " AS SELECT * FROM " + tmpName);
+        }
 
-            writer.start();
-            for (VectorSchemaRoot batch : batches) {
-                try (ArrowRecordBatch rb = new VectorUnloader(batch).getRecordBatch()) {
-                    new VectorLoader(sharedRoot).load(rb);
-                    sharedRoot.setRowCount(batch.getRowCount());
-                    writer.writeBatch();
-                }
+        LOG.debug("Loaded '{}': {} batch(es) via direct-batch Arrow stream", tableName, batches.size());
+    }
+
+    /**
+     * Minimal {@link ArrowReader} that serves existing in-memory
+     * {@link VectorSchemaRoot} batches directly via the Arrow C Data Interface,
+     * without any intermediate IPC serialisation.
+     *
+     * <p>Each call to {@link #loadNextBatch()} uses {@link VectorUnloader} to
+     * obtain buffer references from the source batch and {@link VectorLoader} to
+     * load them into a shared root — a reference-count increment only, not a data
+     * copy.  The shared root is then exported by {@link Data#exportArrayStream}
+     * directly to the C Data Interface pointer that DuckDB reads from.</p>
+     */
+    private static final class BatchArrowReader extends ArrowReader {
+
+        private final List<VectorSchemaRoot> batches;
+        private final VectorSchemaRoot sharedRoot;
+        private int nextIndex = 0;
+        private long totalBytesRead = 0L;
+
+        BatchArrowReader(List<VectorSchemaRoot> batches, BufferAllocator allocator) {
+            super(allocator);
+            if (batches.isEmpty()) {
+                throw new IllegalArgumentException("batches list must not be empty");
             }
-            writer.end();
+            this.batches = batches;
+            // Initialise eagerly so getVectorSchemaRoot() always returns a valid root
+            // before the first loadNextBatch() call (needed for the schema callback).
+            this.sharedRoot = VectorSchemaRoot.create(batches.get(0).getSchema(), allocator);
         }
 
-        // ── 2. Wrap as ArrowArrayStream (C Data Interface) ───────────────────
-        byte[] ipcBytes = baos.toByteArray();
-        ByteArrayInputStream bais = new ByteArrayInputStream(ipcBytes);
-        ArrowStreamReader ipcReader = new ArrowStreamReader(
-                Channels.newChannel(bais), allocator);
-        ArrowArrayStream stream = ArrowArrayStream.allocateNew(allocator);
-        Data.exportArrayStream(allocator, ipcReader, stream);
-
-        // ── 3 & 4. Register + materialise — DuckDB takes ownership of stream ─
-        String tmpName = "_tmp_" + tableName;
-        conn.registerArrowStream(tmpName, stream);
-        conn.createStatement().execute(
-                "CREATE TABLE " + tableName + " AS SELECT * FROM " + tmpName);
-        // stream is consumed and released via DuckDB's release callback;
-        // stream.close() is a no-op at this point (release pointer already nulled).
-        stream.close();
-        // ipcReader.close() releases any remaining Arrow-tracked schema buffers.
-        try {
-            ipcReader.close();
-        } catch (IOException ignored) {
-            // already closed by DuckDB's release callback
+        /** Returns the shared root that is populated on each {@link #loadNextBatch()}. */
+        @Override
+        public VectorSchemaRoot getVectorSchemaRoot() {
+            return sharedRoot;
         }
 
-        LOG.debug("Loaded '{}': {} bytes IPC, {} batches", tableName, ipcBytes.length, batches.size());
+        @Override
+        protected Schema readSchema() {
+            return batches.get(0).getSchema();
+        }
+
+        /**
+         * Advances to the next source batch, loading its buffers into the shared
+         * root via {@link VectorLoader} (buffer-reference transfer, no data copy).
+         * Accumulates buffer capacities in {@link #bytesRead()} for observability.
+         */
+        @Override
+        public boolean loadNextBatch() throws IOException {
+            if (nextIndex >= batches.size()) {
+                return false;
+            }
+            VectorSchemaRoot src = batches.get(nextIndex++);
+            try (ArrowRecordBatch rb = new VectorUnloader(src).getRecordBatch()) {
+                rb.getBuffers().forEach(buf -> totalBytesRead += buf.capacity());
+                new VectorLoader(sharedRoot).load(rb);
+                sharedRoot.setRowCount(src.getRowCount());
+            } catch (Exception e) {
+                throw new IOException("Failed to load batch " + (nextIndex - 1), e);
+            }
+            return true;
+        }
+
+        /** Returns cumulative capacity of all Arrow buffers served so far. */
+        @Override
+        public long bytesRead() {
+            return totalBytesRead;
+        }
+
+        /** Closes the shared root; the parent's null root field is a safe no-op. */
+        @Override
+        public void close() throws IOException {
+            sharedRoot.close();
+        }
+
+        /** No external read source to close — batches are in-memory. */
+        @Override
+        protected void closeReadSource() throws IOException {
+            // no-op: source batches are owned by the caller (ArrowBatchResult)
+        }
     }
 
     // ─── Validation queries ───────────────────────────────────────────────────

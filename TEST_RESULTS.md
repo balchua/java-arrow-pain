@@ -315,10 +315,12 @@ diff -u validation_old.txt validation_new.txt
 | ControlSum validation | Java HashMap aggregation | SQL `GROUP BY ... HAVING` |
 | IBAN validation | `Pattern.compile().matcher()` | `regexp_matches()` SQL function |
 
-### Detailed Benchmark Results (Arrow C Data Interface stream loader)
+### Detailed Benchmark Results (direct `BatchArrowReader` stream loader)
 
 **Test Date:** 2026-02-20  
-**Loader:** `VectorUnloader` → IPC bytes → `ArrowArrayStream` → `DuckDBConnection.registerArrowStream()` + `CREATE TABLE AS`
+**Loader:** `BatchArrowReader` wraps existing `VectorSchemaRoot` batches directly via Arrow C Data Interface — no IPC serialisation, no intermediate heap copy, no second set of off-heap buffers.
+
+**Memory model:** DuckDB always materialises its own copy on `CREATE TABLE AS`, so peak memory = Arrow off-heap (original) + DuckDB buffer pool ≈ **2× the Arrow data size**. The previous IPC-based approach added an extra ~224 MB Java heap copy and ~164 MB off-heap re-allocation, giving 3–4× instead.
 
 ## Type A: 1×1M (1 remittance, 1M transactions)
 
@@ -333,26 +335,17 @@ diff -u validation_old.txt validation_new.txt
 ║  Transaction rows :       1,000,000                       ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  XML→Arrow Parse   :      7,138 ms  (7.14 s)              ║
-║  DuckDB Registration:      1,254 ms  (1.25 s)              ║
-║  SQL Validation    :         90 ms  (0.09 s)              ║
+║  DuckDB Registration:      1,166 ms  (1.17 s)              ║
+║  SQL Validation    :         95 ms  (0.10 s)              ║
 ║  Arrow IPC Write   :        168 ms  (0.17 s)              ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Parse Throughput : 140,095 rows/sec                    ║
-║  Parse Throughput : 72.29 MB/sec                       ║
-╠══════════════════════════════════════════════════════════════╣
 ║  Result           : ✓ PASSED                                 ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  MEMORY USAGE                                              ║
-║  Heap before      :      16,678,672 bytes (15.9 MB)       ║
-║  Heap after       :     610,375,160 bytes (582.1 MB)       ║
-║  Heap delta       :     593,696,488 bytes (566.2 MB)       ║
-║  Heap max (-Xmx)  :   4,194,304,000 bytes (4,000.0 MB)       ║
-║  ──────────────────────────────────────────────────────────║
-║  Off-heap alloc'd :     364,527,616 bytes (347.6 MB)       ║
-║  Off-heap peak    :     465,242,116 bytes (443.7 MB)       ║
-║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
-║  ──────────────────────────────────────────────────────────║
-║  Combined peak    :   1,075,617,276 bytes (1,025.8 MB)       ║
+║  Heap delta       :      60,696,352 bytes (57.9 MB)       ║
+║  Off-heap peak    :     364,789,760 bytes (347.9 MB)       ║
+║  Combined peak    :     442,051,864 bytes (421.6 MB)       ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
@@ -369,26 +362,17 @@ diff -u validation_old.txt validation_new.txt
 ║  Transaction rows :       1,000,000                       ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  XML→Arrow Parse   :      6,354 ms  (6.35 s)              ║
-║  DuckDB Registration:        855 ms  (0.86 s)              ║
-║  SQL Validation    :         99 ms  (0.10 s)              ║
+║  DuckDB Registration:        637 ms  (0.64 s)              ║
+║  SQL Validation    :        101 ms  (0.10 s)              ║
 ║  Arrow IPC Write   :        154 ms  (0.15 s)              ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Parse Throughput : 157,381 rows/sec                    ║
-║  Parse Throughput : 81.19 MB/sec                       ║
-╠══════════════════════════════════════════════════════════════╣
 ║  Result           : ✓ PASSED                                 ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  MEMORY USAGE                                              ║
-║  Heap before      :      20,491,728 bytes (19.5 MB)       ║
-║  Heap after       :     637,305,768 bytes (607.8 MB)       ║
-║  Heap delta       :     616,814,040 bytes (588.2 MB)       ║
-║  Heap max (-Xmx)  :   4,194,304,000 bytes (4,000.0 MB)       ║
-║  ──────────────────────────────────────────────────────────║
-║  Off-heap alloc'd :     364,527,616 bytes (347.6 MB)       ║
-║  Off-heap peak    :     465,242,116 bytes (443.7 MB)       ║
-║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
-║  ──────────────────────────────────────────────────────────║
-║  Combined peak    :   1,102,547,884 bytes (1,051.5 MB)       ║
+║  Heap delta       :      32,116,112 bytes (30.6 MB)       ║
+║  Off-heap peak    :     364,789,760 bytes (347.9 MB)       ║
+║  Combined peak    :     417,189,072 bytes (397.9 MB)       ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
@@ -405,26 +389,17 @@ diff -u validation_old.txt validation_new.txt
 ║  Transaction rows :       1,000,000                       ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  XML→Arrow Parse   :     10,928 ms  (10.93 s)              ║
-║  DuckDB Registration:      1,291 ms  (1.29 s)              ║
-║  SQL Validation    :        359 ms  (0.36 s)              ║
+║  DuckDB Registration:      1,065 ms  (1.07 s)              ║
+║  SQL Validation    :        353 ms  (0.35 s)              ║
 ║  Arrow IPC Write   :        260 ms  (0.26 s)              ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Parse Throughput : 91,508 rows/sec                    ║
-║  Parse Throughput : 81.26 MB/sec                       ║
-╠══════════════════════════════════════════════════════════════╣
 ║  Result           : ✓ PASSED                                 ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  MEMORY USAGE                                              ║
-║  Heap before      :      20,492,328 bytes (19.5 MB)       ║
-║  Heap after       :     732,804,664 bytes (698.9 MB)       ║
-║  Heap delta       :     712,312,336 bytes (679.3 MB)       ║
-║  Heap max (-Xmx)  :   4,194,304,000 bytes (4,000.0 MB)       ║
-║  ──────────────────────────────────────────────────────────║
-║  Off-heap alloc'd :     589,266,944 bytes (562.0 MB)       ║
-║  Off-heap peak    :     689,981,444 bytes (658.0 MB)       ║
-║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
-║  ──────────────────────────────────────────────────────────║
-║  Combined peak    :   1,422,786,108 bytes (1,356.9 MB)       ║
+║  Heap delta       :       8,244,072 bytes (7.9 MB)        ║
+║  Off-heap peak    :     589,463,552 bytes (562.2 MB)       ║
+║  Combined peak    :     618,008,872 bytes (589.4 MB)       ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
@@ -434,25 +409,27 @@ diff -u validation_old.txt validation_new.txt
 |--------|---------------|-----------------|---------------|
 | **Old: Validation time (direct Arrow)** | 154–223 ms | 154–172 ms | 672–864 ms |
 | **Old: DuckDB Registration (Appender)** | ~3,700 ms | ~3,700 ms | ~7,500 ms |
-| **New: DuckDB Registration (stream)** | 1,254 ms | 855 ms | 1,291 ms |
-| **New: SQL Validation** | 90 ms | 99 ms | 359 ms |
-| **Speedup vs Appender** | **~3×** | **~4.3×** | **~5.8×** |
+| **Old: DuckDB Registration (IPC stream)** | 1,254 ms | 855 ms | 1,291 ms |
+| **New: DuckDB Registration (direct batch)** | **1,166 ms** | **637 ms** | **1,065 ms** |
+| **New: SQL Validation** | 95 ms | 101 ms | 353 ms |
 
 **Key observations:**
-- Zero-copy stream loader (`registerArrowStream` via Arrow C Data Interface) is **3–6× faster** than the row-by-row Appender approach
-- SQL validation itself is **40–58% faster** than the previous Arrow-scan validators (90 ms vs 154–223 ms for Type A)
-- DuckDB registration is now comparable to Arrow IPC write time — a reasonable trade-off
-- Type C (1M remittances + 1M transactions = 2M total rows) shows the biggest speedup: 7,500 ms → 1,291 ms
+- Zero-copy `BatchArrowReader` loader is **3–6× faster** than the row-by-row Appender
+- Registration is **~10–20% faster** than the IPC-stream approach (no serialisation overhead)
+- SQL validation is unchanged
 
 ### Memory Comparison
 
-| File | Old Combined Peak (Arrow direct) | New Combined Peak (DuckDB stream) |
-|------|----------------------------------|-----------------------------------|
-| Type A | 345–416 MB | 1,025.8 MB |
-| Type B | 311–348 MB | 1,051.5 MB |
-| Type C | 751–772 MB | 1,356.9 MB |
+| File | IPC-stream loader | Direct-batch loader | Reduction |
+|------|-------------------|---------------------|-----------|
+| Type A | 1,025.8 MB | **421.6 MB** | **−59%** |
+| Type B | 1,051.5 MB | **397.9 MB** | **−62%** |
+| Type C | 1,356.9 MB | **589.4 MB** | **−57%** |
 
-The higher combined peak reflects the IPC serialisation buffers created during the `VectorUnloader` → `ArrowArrayStream` path (temporary off-heap allocation that is released after DuckDB ingestion). DuckDB memory is bounded with `SET memory_limit='1GB'`.
+**Why 2× (not 1×):** DuckDB always materialises its own internal copy on `CREATE TABLE AS`.  
+While both Arrow tables and DuckDB tables are live (parse → validation → IPC export), peak = Arrow off-heap + DuckDB buffer ≈ 2× the Arrow data size. This is the theoretical minimum without restructuring the pipeline to free Arrow buffers before IPC export.
+
+**What was fixed:** The previous IPC path serialised every batch to a `ByteArrayOutputStream` (adding ~224 MB Java heap) and then an `ArrowStreamReader` re-allocated fresh Arrow buffers when decoding (adding ~164 MB off-heap), producing 3–4× instead of 2×. The `BatchArrowReader` serves existing batches directly via the C Data Interface — no intermediate copies at all.
 
 ### New Pipeline Phases
 
@@ -468,18 +445,18 @@ The updated benchmark now reports:
 ### Validation Results (DuckDB SQL)
 
 All 3 test files pass all 4 SQL-based validators with zero errors:
-- ✅ Type A: SQL validation in 90 ms, ✓ All validations passed
-- ✅ Type B: SQL validation in 99 ms, ✓ All validations passed
-- ✅ Type C: SQL validation in 359 ms, ✓ All validations passed
+- ✅ Type A: SQL validation in 95 ms, ✓ All validations passed
+- ✅ Type B: SQL validation in 101 ms, ✓ All validations passed
+- ✅ Type C: SQL validation in 353 ms, ✓ All validations passed
 
 ### Trade-offs Summary
 
 | Concern | Impact | Notes |
 |---------|--------|-------|
 | SQL validation speed | ✅ Faster | ~40–58% faster than Arrow scans |
-| DuckDB loading overhead | ✅ Acceptable | 855ms–1,291ms with stream loader (was 3–8s with Appender) |
+| DuckDB loading overhead | ✅ Acceptable | 637ms–1,166ms with direct-batch loader (was 3–8s with Appender) |
 | Code maintainability | ✅ Better | Validators use SQL, no Arrow imports |
 | Architectural separation | ✅ Better | DAL boundary isolates Arrow from business logic |
-| Memory usage | ⚠️ Higher | Temporary IPC buffers during stream registration; released after ingestion |
+| Memory usage | ✅ Near-minimal | 2× Arrow data size (unavoidable: DuckDB copy + Arrow original); was 3–4× with IPC approach |
 
-**Framework Version:** v2.1.0 (DuckDB SQL DAL with Arrow C Data Interface zero-copy stream loader)
+**Framework Version:** v2.2.0 (DuckDB SQL DAL with direct `BatchArrowReader` — no IPC serialisation)

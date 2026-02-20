@@ -105,19 +105,19 @@ public final class Pain001Repository implements AutoCloseable {
         try (DuckDBAppender appender = conn.createAppender(
                 DuckDBConnection.DEFAULT_SCHEMA, "message")) {
             int rows = root.getRowCount();
-            VarCharVector msgId   = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_ID);
-            VarCharVector creDtTm = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_CRE_DT_TM);
-            VarCharVector nbOfTxs = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_NB_OF_TXS);
-            DecimalVector ctrlSum = (DecimalVector)  root.getVector(Pain001ArrowSchema.MSG_CTRL_SUM);
-            VarCharVector initgPty = (VarCharVector) root.getVector(Pain001ArrowSchema.MSG_INITG_PTY_NM);
+            VarCharVector msgIdVec    = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_ID);
+            VarCharVector creDtTmVec  = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_CRE_DT_TM);
+            VarCharVector nbOfTxsVec  = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_NB_OF_TXS);
+            DecimalVector ctrlSumVec  = (DecimalVector)  root.getVector(Pain001ArrowSchema.MSG_CTRL_SUM);
+            VarCharVector initgPtyVec = (VarCharVector)  root.getVector(Pain001ArrowSchema.MSG_INITG_PTY_NM);
 
             for (int i = 0; i < rows; i++) {
                 appender.beginRow();
-                appendVarChar(appender, msgId, i);
-                appendVarChar(appender, creDtTm, i);
-                appendVarChar(appender, nbOfTxs, i);
-                appendDecimal(appender, ctrlSum, i);
-                appendVarChar(appender, initgPty, i);
+                appendVarChar(appender, msgIdVec, i);
+                appendVarChar(appender, creDtTmVec, i);
+                appendVarChar(appender, nbOfTxsVec, i);
+                appendDecimal(appender, ctrlSumVec, i);
+                appendVarChar(appender, initgPtyVec, i);
                 appender.endRow();
             }
             appender.flush();
@@ -135,7 +135,7 @@ public final class Pain001Repository implements AutoCloseable {
                 VarCharVector nbOfTxs    = (VarCharVector)  batch.getVector(Pain001ArrowSchema.RMT_NB_OF_TXS);
                 DecimalVector ctrlSum    = (DecimalVector)  batch.getVector(Pain001ArrowSchema.RMT_CTRL_SUM);
                 VarCharVector svcLvlCd   = (VarCharVector)  batch.getVector(Pain001ArrowSchema.RMT_SVC_LVL_CD);
-                DateDayVector reqdDt     = (DateDayVector)  batch.getVector(Pain001ArrowSchema.RMT_REQD_EXCTN_DT);
+                DateDayVector reqdExctnDt = (DateDayVector) batch.getVector(Pain001ArrowSchema.RMT_REQD_EXCTN_DT);
                 VarCharVector dbtrNm     = (VarCharVector)  batch.getVector(Pain001ArrowSchema.RMT_DBTR_NM);
                 VarCharVector dbtrIban   = (VarCharVector)  batch.getVector(Pain001ArrowSchema.RMT_DBTR_ACCT_IBAN);
                 VarCharVector dbtrBicfi  = (VarCharVector)  batch.getVector(Pain001ArrowSchema.RMT_DBTR_AGT_BICFI);
@@ -148,7 +148,7 @@ public final class Pain001Repository implements AutoCloseable {
                     appendVarChar(appender, nbOfTxs, i);
                     appendDecimal(appender, ctrlSum, i);
                     appendVarChar(appender, svcLvlCd, i);
-                    appendDate(appender, reqdDt, i);
+                    appendDate(appender, reqdExctnDt, i);
                     appendVarChar(appender, dbtrNm, i);
                     appendVarChar(appender, dbtrIban, i);
                     appendVarChar(appender, dbtrBicfi, i);
@@ -164,27 +164,27 @@ public final class Pain001Repository implements AutoCloseable {
                 DuckDBConnection.DEFAULT_SCHEMA, "transactions")) {
             for (VectorSchemaRoot batch : batches) {
                 int rows = batch.getRowCount();
-                VarCharVector pmtInfId   = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_PMT_INF_ID);
-                VarCharVector instrId    = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_INSTR_ID);
-                VarCharVector e2eId      = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_END_TO_END_ID);
-                DecimalVector instdAmt   = (DecimalVector)  batch.getVector(Pain001ArrowSchema.TX_INSTD_AMT);
-                VarCharVector ccy        = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CCY);
-                VarCharVector cdtrBicfi  = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CDTR_AGT_BICFI);
-                VarCharVector cdtrNm     = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CDTR_NM);
-                VarCharVector cdtrIban   = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CDTR_ACCT_IBAN);
-                VarCharVector rmtInf     = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_RMT_INF_USTRD);
+                VarCharVector pmtInfIdVec  = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_PMT_INF_ID);
+                VarCharVector instrIdVec   = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_INSTR_ID);
+                VarCharVector endToEndIdVec = (VarCharVector) batch.getVector(Pain001ArrowSchema.TX_END_TO_END_ID);
+                DecimalVector instdAmtVec  = (DecimalVector)  batch.getVector(Pain001ArrowSchema.TX_INSTD_AMT);
+                VarCharVector ccyVec       = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CCY);
+                VarCharVector cdtrBicfiVec = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CDTR_AGT_BICFI);
+                VarCharVector cdtrNmVec    = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CDTR_NM);
+                VarCharVector cdtrIbanVec  = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_CDTR_ACCT_IBAN);
+                VarCharVector rmtInfVec    = (VarCharVector)  batch.getVector(Pain001ArrowSchema.TX_RMT_INF_USTRD);
 
                 for (int i = 0; i < rows; i++) {
                     appender.beginRow();
-                    appendVarChar(appender, pmtInfId, i);
-                    appendVarChar(appender, instrId, i);
-                    appendVarChar(appender, e2eId, i);
-                    appendDecimal(appender, instdAmt, i);
-                    appendVarChar(appender, ccy, i);
-                    appendVarChar(appender, cdtrBicfi, i);
-                    appendVarChar(appender, cdtrNm, i);
-                    appendVarChar(appender, cdtrIban, i);
-                    appendVarChar(appender, rmtInf, i);
+                    appendVarChar(appender, pmtInfIdVec, i);
+                    appendVarChar(appender, instrIdVec, i);
+                    appendVarChar(appender, endToEndIdVec, i);
+                    appendDecimal(appender, instdAmtVec, i);
+                    appendVarChar(appender, ccyVec, i);
+                    appendVarChar(appender, cdtrBicfiVec, i);
+                    appendVarChar(appender, cdtrNmVec, i);
+                    appendVarChar(appender, cdtrIbanVec, i);
+                    appendVarChar(appender, rmtInfVec, i);
                     appender.endRow();
                 }
             }

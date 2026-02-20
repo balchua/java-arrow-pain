@@ -170,7 +170,7 @@ public final class LoadBenchmark {
         if (duckdbDuration != null) {
             sb.append("╠══════════════════════════════════════════════════════════════╣\n");
             sb.append("║  DUCKDB REGISTRATION                                       ║\n");
-            sb.append(String.format("║  read_ipc() + views: %,10d ms                          ║%n",
+            sb.append(String.format("║  Appender load time: %,10d ms                          ║%n",
                     duckdbDuration.toMillis()));
         }
 

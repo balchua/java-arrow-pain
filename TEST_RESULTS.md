@@ -296,3 +296,76 @@ diff -u validation_old.txt validation_new.txt
 **Generated:** 2026-02-15  
 **Author:** Automated Test Suite  
 **Framework Version:** v1.0.0 (Chainable Validation with Virtual Threads)
+
+---
+
+## DuckDB SQL DAL Refactor: Before vs After Comparison
+
+**Refactor Date:** 2026-02-20  
+**Change:** Validators rewritten to use SQL via `Pain001Repository` (DuckDB) instead of direct Apache Arrow API
+
+### Architecture Change
+
+| Aspect | Before (Arrow Direct) | After (DuckDB SQL DAL) |
+|--------|----------------------|------------------------|
+| Validator accesses | `ArrowBatchResult` → `VectorSchemaRoot` | `Pain001Repository` → SQL |
+| Arrow imports in validators | Yes (`org.apache.arrow.*`) | No (Arrow isolated to DAL) |
+| Query engine | Java loops over Arrow vectors | DuckDB vectorised SQL |
+| Data loading | Arrow in-memory only | Arrow → DuckDB Appender → in-memory tables |
+| ControlSum validation | Java HashMap aggregation | SQL `GROUP BY ... HAVING` |
+| IBAN validation | `Pattern.compile().matcher()` | `regexp_matches()` SQL function |
+
+### Performance Comparison (1M transactions)
+
+| Metric | Type A (1×1M) | Type B (2×500K) | Type C (1M×1) |
+|--------|---------------|-----------------|---------------|
+| **Old: Validation time** | 154–223 ms | 154–172 ms | 672–864 ms |
+| **New: DuckDB Registration** | ~3,700 ms | ~3,700 ms | ~7,500 ms |
+| **New: SQL Validation** | ~96 ms | ~96 ms | ~380 ms |
+| **New: Total (reg + validate)** | ~3,800 ms | ~3,800 ms | ~7,900 ms |
+
+**Key observations:**
+- SQL validation itself (after data is in DuckDB) is **40–55% faster** than the previous Arrow-scan validators
+- DuckDB Appender loading adds significant overhead for 1M-row datasets (~3–8 seconds)
+- The net pipeline time increases due to loading overhead; this is a trade-off for SQL expressiveness
+- Type C (1M remittances) is the worst case for loading (double the rows)
+
+### Memory Comparison
+
+| File | Old Combined Peak | New Combined Peak |
+|------|-------------------|-------------------|
+| Type A | 345–416 MB | ~317 MB |
+| Type B | 311–348 MB | ~317 MB |
+| Type C | 751–772 MB | ~511 MB |
+
+DuckDB's in-process buffer pool uses additional memory for its own data structures, but the Arrow off-heap footprint stays the same (data is still held in Arrow vectors during parsing).
+
+### New Pipeline Phases
+
+The updated benchmark now reports:
+
+| Phase | Description |
+|-------|-------------|
+| `XML→Arrow Parse` | StAX streaming parse (unchanged) |
+| `DuckDB Registration` | Arrow Appender loading into DuckDB in-memory tables |
+| `SQL Validation` | DuckDB SQL queries for all 4 validators |
+| `Arrow IPC Write` | Persistent .arrow file export (unchanged) |
+
+### Validation Results (DuckDB SQL)
+
+All 3 test files pass all 4 SQL-based validators with zero errors:
+- ✅ Type A: SQL validation in ~96 ms, ✓ All validations passed
+- ✅ Type B: SQL validation in ~96 ms, ✓ All validations passed
+- ✅ Type C: SQL validation in ~380 ms, ✓ All validations passed
+
+### Trade-offs Summary
+
+| Concern | Impact | Notes |
+|---------|--------|-------|
+| SQL validation speed | ✅ Faster | ~40–55% faster than Arrow scans |
+| DuckDB loading overhead | ⚠️ Slower | +3–8s for row-by-row Appender load |
+| Code maintainability | ✅ Better | Validators use SQL, no Arrow imports |
+| Architectural separation | ✅ Better | DAL boundary isolates Arrow from business logic |
+| Memory usage | ✅ Similar/Better | DuckDB buffer pool vs Arrow HashMap overhead |
+
+**Framework Version:** v2.0.0 (DuckDB SQL DAL with Pain001Repository)

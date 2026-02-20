@@ -161,7 +161,7 @@ public final class Pain001StaxParser {
         String txCdtrAgtBicfi = null;
         String txCdtrNm = null;
         String txCdtrAcctIban = null;
-        String txRmtInfUstrd = null;
+        StringBuilder txRmtInfUstrd = null; // accumulates multiple Ustrd lines
 
         long totalTx = 0;
         long totalRmt = 0;
@@ -348,8 +348,16 @@ public final class Pain001StaxParser {
                             }
                         }
                         case "Ustrd" -> {
-                            if (inCdtTrfTxInf)
-                                txRmtInfUstrd = textContent.toString().trim();
+                            if (inCdtTrfTxInf) {
+                                String line = textContent.toString().trim();
+                                if (!line.isEmpty()) {
+                                    if (txRmtInfUstrd == null) {
+                                        txRmtInfUstrd = new StringBuilder(line);
+                                    } else {
+                                        txRmtInfUstrd.append('\n').append(line);
+                                    }
+                                }
+                            }
                         }
 
                         // ── CdtTrfTxInf end → write transaction row ────
@@ -362,7 +370,8 @@ public final class Pain001StaxParser {
                             setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_AGT_BICFI, txRow, txCdtrAgtBicfi);
                             setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_NM, txRow, txCdtrNm);
                             setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_ACCT_IBAN, txRow, txCdtrAcctIban);
-                            setVarChar(txRoot, Pain001ArrowSchema.TX_RMT_INF_USTRD, txRow, txRmtInfUstrd);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_RMT_INF_USTRD, txRow,
+                                    txRmtInfUstrd != null ? txRmtInfUstrd.toString() : null);
                             txRow++;
                             totalTx++;
 

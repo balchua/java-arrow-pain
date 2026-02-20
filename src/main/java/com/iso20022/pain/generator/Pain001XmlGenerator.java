@@ -282,10 +282,12 @@ public final class Pain001XmlGenerator {
         writer.writeEndElement(); // Id
         writer.writeEndElement(); // CdtrAcct
 
-        // RmtInf/Ustrd
+        // RmtInf — 2 Ustrd lines (ISO 20022 allows up to 140; realistic messages use a few)
         writer.writeStartElement("RmtInf");
         writeElement(writer, "Ustrd",
                 String.format("Invoice PMT%06d-TX%07d", pmtIndex + 1, txIndex + 1));
+        writeElement(writer, "Ustrd",
+                String.format("Ref %s/%s", CREDITOR_NAMES[credIdx].replaceAll("\\s+", "-"), txIndex + 1));
         writer.writeEndElement(); // RmtInf
 
         writer.writeEndElement(); // CdtTrfTxInf

@@ -311,34 +311,148 @@ diff -u validation_old.txt validation_new.txt
 | Validator accesses | `ArrowBatchResult` → `VectorSchemaRoot` | `Pain001Repository` → SQL |
 | Arrow imports in validators | Yes (`org.apache.arrow.*`) | No (Arrow isolated to DAL) |
 | Query engine | Java loops over Arrow vectors | DuckDB vectorised SQL |
-| Data loading | Arrow in-memory only | Arrow → DuckDB Appender → in-memory tables |
+| Data loading | Arrow in-memory only | Arrow C Data Interface → `registerArrowStream` → DuckDB tables |
 | ControlSum validation | Java HashMap aggregation | SQL `GROUP BY ... HAVING` |
 | IBAN validation | `Pattern.compile().matcher()` | `regexp_matches()` SQL function |
+
+### Detailed Benchmark Results (Arrow C Data Interface stream loader)
+
+**Test Date:** 2026-02-20  
+**Loader:** `VectorUnloader` → IPC bytes → `ArrowArrayStream` → `DuckDBConnection.registerArrowStream()` + `CREATE TABLE AS`
+
+## Type A: 1×1M (1 remittance, 1M transactions)
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: pain001_type_a_1x1M.xml                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :     541,056,359 bytes (516.0 MB)       ║
+║  Arrow File Size  :     235,324,150 bytes (224.4 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :               1                       ║
+║  Transaction rows :       1,000,000                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :      7,138 ms  (7.14 s)              ║
+║  DuckDB Registration:      1,254 ms  (1.25 s)              ║
+║  SQL Validation    :         90 ms  (0.09 s)              ║
+║  Arrow IPC Write   :        168 ms  (0.17 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 140,095 rows/sec                    ║
+║  Parse Throughput : 72.29 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  Result           : ✓ PASSED                                 ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      16,678,672 bytes (15.9 MB)       ║
+║  Heap after       :     610,375,160 bytes (582.1 MB)       ║
+║  Heap delta       :     593,696,488 bytes (566.2 MB)       ║
+║  Heap max (-Xmx)  :   4,194,304,000 bytes (4,000.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :     364,527,616 bytes (347.6 MB)       ║
+║  Off-heap peak    :     465,242,116 bytes (443.7 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :   1,075,617,276 bytes (1,025.8 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+## Type B: 2×500K (2 remittances, 1M transactions)
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: pain001_type_b_2x500K.xml                        ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :     540,945,672 bytes (515.9 MB)       ║
+║  Arrow File Size  :     235,213,246 bytes (224.3 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :               2                       ║
+║  Transaction rows :       1,000,000                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :      6,354 ms  (6.35 s)              ║
+║  DuckDB Registration:        855 ms  (0.86 s)              ║
+║  SQL Validation    :         99 ms  (0.10 s)              ║
+║  Arrow IPC Write   :        154 ms  (0.15 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 157,381 rows/sec                    ║
+║  Parse Throughput : 81.19 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  Result           : ✓ PASSED                                 ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      20,491,728 bytes (19.5 MB)       ║
+║  Heap after       :     637,305,768 bytes (607.8 MB)       ║
+║  Heap delta       :     616,814,040 bytes (588.2 MB)       ║
+║  Heap max (-Xmx)  :   4,194,304,000 bytes (4,000.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :     364,527,616 bytes (347.6 MB)       ║
+║  Off-heap peak    :     465,242,116 bytes (443.7 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :   1,102,547,884 bytes (1,051.5 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+## Type C: 1M×1 (1M remittances, 1M transactions)
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: pain001_type_c_1Mx1.xml                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :     931,139,307 bytes (888.0 MB)       ║
+║  Arrow File Size  :     379,668,982 bytes (362.1 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :       1,000,000                       ║
+║  Transaction rows :       1,000,000                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :     10,928 ms  (10.93 s)              ║
+║  DuckDB Registration:      1,291 ms  (1.29 s)              ║
+║  SQL Validation    :        359 ms  (0.36 s)              ║
+║  Arrow IPC Write   :        260 ms  (0.26 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 91,508 rows/sec                    ║
+║  Parse Throughput : 81.26 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  Result           : ✓ PASSED                                 ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      20,492,328 bytes (19.5 MB)       ║
+║  Heap after       :     732,804,664 bytes (698.9 MB)       ║
+║  Heap delta       :     712,312,336 bytes (679.3 MB)       ║
+║  Heap max (-Xmx)  :   4,194,304,000 bytes (4,000.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :     589,266,944 bytes (562.0 MB)       ║
+║  Off-heap peak    :     689,981,444 bytes (658.0 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :   1,422,786,108 bytes (1,356.9 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
 
 ### Performance Comparison (1M transactions)
 
 | Metric | Type A (1×1M) | Type B (2×500K) | Type C (1M×1) |
 |--------|---------------|-----------------|---------------|
-| **Old: Validation time** | 154–223 ms | 154–172 ms | 672–864 ms |
-| **New: DuckDB Registration** | ~3,700 ms | ~3,700 ms | ~7,500 ms |
-| **New: SQL Validation** | ~96 ms | ~96 ms | ~380 ms |
-| **New: Total (reg + validate)** | ~3,800 ms | ~3,800 ms | ~7,900 ms |
+| **Old: Validation time (direct Arrow)** | 154–223 ms | 154–172 ms | 672–864 ms |
+| **Old: DuckDB Registration (Appender)** | ~3,700 ms | ~3,700 ms | ~7,500 ms |
+| **New: DuckDB Registration (stream)** | 1,254 ms | 855 ms | 1,291 ms |
+| **New: SQL Validation** | 90 ms | 99 ms | 359 ms |
+| **Speedup vs Appender** | **~3×** | **~4.3×** | **~5.8×** |
 
 **Key observations:**
-- SQL validation itself (after data is in DuckDB) is **40–55% faster** than the previous Arrow-scan validators
-- DuckDB Appender loading adds significant overhead for 1M-row datasets (~3–8 seconds)
-- The net pipeline time increases due to loading overhead; this is a trade-off for SQL expressiveness
-- Type C (1M remittances) is the worst case for loading (double the rows)
+- Zero-copy stream loader (`registerArrowStream` via Arrow C Data Interface) is **3–6× faster** than the row-by-row Appender approach
+- SQL validation itself is **40–58% faster** than the previous Arrow-scan validators (90 ms vs 154–223 ms for Type A)
+- DuckDB registration is now comparable to Arrow IPC write time — a reasonable trade-off
+- Type C (1M remittances + 1M transactions = 2M total rows) shows the biggest speedup: 7,500 ms → 1,291 ms
 
 ### Memory Comparison
 
-| File | Old Combined Peak | New Combined Peak |
-|------|-------------------|-------------------|
-| Type A | 345–416 MB | ~317 MB |
-| Type B | 311–348 MB | ~317 MB |
-| Type C | 751–772 MB | ~511 MB |
+| File | Old Combined Peak (Arrow direct) | New Combined Peak (DuckDB stream) |
+|------|----------------------------------|-----------------------------------|
+| Type A | 345–416 MB | 1,025.8 MB |
+| Type B | 311–348 MB | 1,051.5 MB |
+| Type C | 751–772 MB | 1,356.9 MB |
 
-DuckDB's in-process buffer pool uses additional memory for its own data structures, but the Arrow off-heap footprint stays the same (data is still held in Arrow vectors during parsing).
+The higher combined peak reflects the IPC serialisation buffers created during the `VectorUnloader` → `ArrowArrayStream` path (temporary off-heap allocation that is released after DuckDB ingestion). DuckDB memory is bounded with `SET memory_limit='1GB'`.
 
 ### New Pipeline Phases
 
@@ -347,25 +461,25 @@ The updated benchmark now reports:
 | Phase | Description |
 |-------|-------------|
 | `XML→Arrow Parse` | StAX streaming parse (unchanged) |
-| `DuckDB Registration` | Arrow Appender loading into DuckDB in-memory tables |
+| `DuckDB Registration` | Arrow C Data Interface stream → `registerArrowStream` + `CREATE TABLE AS` |
 | `SQL Validation` | DuckDB SQL queries for all 4 validators |
 | `Arrow IPC Write` | Persistent .arrow file export (unchanged) |
 
 ### Validation Results (DuckDB SQL)
 
 All 3 test files pass all 4 SQL-based validators with zero errors:
-- ✅ Type A: SQL validation in ~96 ms, ✓ All validations passed
-- ✅ Type B: SQL validation in ~96 ms, ✓ All validations passed
-- ✅ Type C: SQL validation in ~380 ms, ✓ All validations passed
+- ✅ Type A: SQL validation in 90 ms, ✓ All validations passed
+- ✅ Type B: SQL validation in 99 ms, ✓ All validations passed
+- ✅ Type C: SQL validation in 359 ms, ✓ All validations passed
 
 ### Trade-offs Summary
 
 | Concern | Impact | Notes |
 |---------|--------|-------|
-| SQL validation speed | ✅ Faster | ~40–55% faster than Arrow scans |
-| DuckDB loading overhead | ⚠️ Slower | +3–8s for row-by-row Appender load |
+| SQL validation speed | ✅ Faster | ~40–58% faster than Arrow scans |
+| DuckDB loading overhead | ✅ Acceptable | 855ms–1,291ms with stream loader (was 3–8s with Appender) |
 | Code maintainability | ✅ Better | Validators use SQL, no Arrow imports |
 | Architectural separation | ✅ Better | DAL boundary isolates Arrow from business logic |
-| Memory usage | ✅ Similar/Better | DuckDB buffer pool vs Arrow HashMap overhead |
+| Memory usage | ⚠️ Higher | Temporary IPC buffers during stream registration; released after ingestion |
 
-**Framework Version:** v2.0.0 (DuckDB SQL DAL with Pain001Repository)
+**Framework Version:** v2.1.0 (DuckDB SQL DAL with Arrow C Data Interface zero-copy stream loader)

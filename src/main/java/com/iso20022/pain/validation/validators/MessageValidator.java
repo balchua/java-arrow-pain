@@ -1,66 +1,47 @@
 package com.iso20022.pain.validation.validators;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
-import com.iso20022.pain.arrow.Pain001ArrowSchema;
+import com.iso20022.pain.dal.Pain001Repository;
+import com.iso20022.pain.dal.Pain001Repository.Issue;
 import com.iso20022.pain.validation.ValidationContext;
 import com.iso20022.pain.validation.Validator;
-import org.apache.arrow.vector.VarCharVector;
-import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
+import java.util.List;
 
 /**
- * Validates message-level fields in the Arrow batch result.
- * 
+ * Validates message-level fields via SQL through the {@link Pain001Repository}.
+ *
  * <p>Checks:</p>
  * <ul>
- *   <li>MsgId length ≤ 35 characters</li>
- *   <li>Warns if InitgPty is missing</li>
+ *   <li>MsgId length &le; 35 characters</li>
+ *   <li>Warns if InitgPty name is missing</li>
  *   <li>Errors if CreDtTm is missing</li>
  * </ul>
- * 
+ *
  * <p>This validator is parallelizable.</p>
  */
 public final class MessageValidator implements Validator {
 
     private static final Logger LOG = LoggerFactory.getLogger(MessageValidator.class);
-    private static final int MAX_MSG_ID_LENGTH = 35;
 
     @Override
-    public void validate(ArrowBatchResult result, ValidationContext context) {
-        VectorSchemaRoot msgRoot = result.getMessageRoot();
-        
-        if (msgRoot.getRowCount() == 0) {
-            context.addError(getName(), "No message row found");
-            return;
-        }
-
-        // Validate MsgId
-        VarCharVector msgIdVec = (VarCharVector) msgRoot.getVector(Pain001ArrowSchema.MSG_ID);
-        if (!msgIdVec.isNull(0)) {
-            String msgId = new String(msgIdVec.get(0), StandardCharsets.UTF_8);
-            if (msgId.length() > MAX_MSG_ID_LENGTH) {
-                context.addError(getName(), 
-                        "MsgId exceeds maximum length of " + MAX_MSG_ID_LENGTH + " characters",
-                        msgId.length());
+    public void validate(Pain001Repository repository, ValidationContext context) {
+        try {
+            List<Issue> issues = repository.validateMessageFields();
+            for (Issue issue : issues) {
+                if (issue.message().startsWith("WARN:")) {
+                    context.addWarning(getName(), issue.message().substring(5), issue.id());
+                } else {
+                    context.addError(getName(), issue.message(), issue.id());
+                }
             }
+            LOG.debug("{} completed: {} issue(s)", getName(), issues.size());
+        } catch (SQLException e) {
+            LOG.error("{} failed: {}", getName(), e.getMessage(), e);
+            context.addError(getName(), "SQL validation failed", e.getMessage());
         }
-
-        // Validate InitgPty (warn if missing)
-        VarCharVector initgPtyVec = (VarCharVector) msgRoot.getVector(Pain001ArrowSchema.MSG_INITG_PTY_NM);
-        if (initgPtyVec.isNull(0)) {
-            context.addWarning(getName(), "Initiating party (InitgPty) is missing");
-        }
-
-        // Validate CreDtTm (error if missing)
-        VarCharVector creDtTmVec = (VarCharVector) msgRoot.getVector(Pain001ArrowSchema.MSG_CRE_DT_TM);
-        if (creDtTmVec.isNull(0)) {
-            context.addError(getName(), "Creation date/time (CreDtTm) is required but missing");
-        }
-
-        LOG.debug("{} completed", getName());
     }
 
     @Override

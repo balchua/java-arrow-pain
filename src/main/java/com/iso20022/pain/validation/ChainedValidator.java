@@ -1,6 +1,6 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.dal.Pain001Repository;
 
 /**
  * Internal implementation for chaining validators together.
@@ -19,9 +19,9 @@ final class ChainedValidator implements Validator {
     }
 
     @Override
-    public void validate(ArrowBatchResult result, ValidationContext context) {
-        first.validate(result, context);
-        second.validate(result, context);
+    public void validate(Pain001Repository repository, ValidationContext context) {
+        first.validate(repository, context);
+        second.validate(repository, context);
     }
 
     @Override

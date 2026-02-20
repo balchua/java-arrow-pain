@@ -8,7 +8,6 @@ import com.iso20022.pain.validation.validators.TransactionValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +32,7 @@ public final class ValidationPipeline {
     private ValidationPipeline() {
         this.validators = new ArrayList<>();
         this.executionMode = ExecutionMode.AUTO;
-        this.useVirtualThreads = isVirtualThreadsSupported();
+        this.useVirtualThreads = true;
     }
 
     /**
@@ -111,7 +110,7 @@ public final class ValidationPipeline {
      * @return this pipeline for chaining
      */
     public ValidationPipeline withVirtualThreads(boolean enabled) {
-        this.useVirtualThreads = enabled && isVirtualThreadsSupported();
+        this.useVirtualThreads = enabled;
         return this;
     }
 
@@ -190,18 +189,13 @@ public final class ValidationPipeline {
             List<Validator> validators) {
         LOG.debug("Using virtual threads for {} parallel validators", validators.size());
 
-        ExecutorService executor = createVirtualThreadExecutor();
-        try {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<?>> futures = new ArrayList<>();
 
             for (Validator v : validators) {
-                Future<?> future = executor.submit(() -> {
-                    executeValidator(v, repository, context);
-                });
-                futures.add(future);
+                futures.add(executor.submit(() -> executeValidator(v, repository, context)));
             }
 
-            // Wait for all to complete
             for (Future<?> future : futures) {
                 try {
                     future.get();
@@ -210,8 +204,6 @@ public final class ValidationPipeline {
                     context.addError("ValidationPipeline", "Validator failed", e.getMessage());
                 }
             }
-        } finally {
-            executor.shutdown();
         }
     }
 
@@ -219,19 +211,14 @@ public final class ValidationPipeline {
             List<Validator> validators) {
         LOG.debug("Using platform threads for {} parallel validators", validators.size());
 
-        ExecutorService executor = Executors.newFixedThreadPool(
-                Math.min(validators.size(), Runtime.getRuntime().availableProcessors()));
-        try {
+        try (ExecutorService executor = Executors.newFixedThreadPool(
+                Math.min(validators.size(), Runtime.getRuntime().availableProcessors()))) {
             List<Future<?>> futures = new ArrayList<>();
 
             for (Validator v : validators) {
-                Future<?> future = executor.submit(() -> {
-                    executeValidator(v, repository, context);
-                });
-                futures.add(future);
+                futures.add(executor.submit(() -> executeValidator(v, repository, context)));
             }
 
-            // Wait for all to complete
             for (Future<?> future : futures) {
                 try {
                     future.get();
@@ -240,8 +227,6 @@ public final class ValidationPipeline {
                     context.addError("ValidationPipeline", "Validator failed", e.getMessage());
                 }
             }
-        } finally {
-            executor.shutdown();
         }
     }
 
@@ -255,30 +240,6 @@ public final class ValidationPipeline {
         } catch (Exception e) {
             LOG.error("  ✗ {} failed: {}", validator.getName(), e.getMessage(), e);
             context.addError(validator.getName(), "Validation failed with exception", e.getMessage());
-        }
-    }
-
-    private static boolean isVirtualThreadsSupported() {
-        try {
-            // Check if we're running on Java 21+
-            Method ofVirtualMethod = Thread.class.getMethod("ofVirtual");
-            LOG.debug("Virtual threads are supported (Java 21+)");
-            return true;
-        } catch (NoSuchMethodException e) {
-            LOG.debug("Virtual threads not supported (Java < 21)");
-            return false;
-        }
-    }
-
-    private static ExecutorService createVirtualThreadExecutor() {
-        try {
-            // Use reflection to call Executors.newVirtualThreadPerTaskExecutor()
-            Method method = Executors.class.getMethod("newVirtualThreadPerTaskExecutor");
-            return (ExecutorService) method.invoke(null);
-        } catch (Exception e) {
-            LOG.warn("Failed to create virtual thread executor, falling back to platform threads: {}",
-                    e.getMessage());
-            return Executors.newCachedThreadPool();
         }
     }
 }

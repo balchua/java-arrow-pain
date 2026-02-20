@@ -4,7 +4,6 @@ import com.iso20022.pain.dal.Pain001Repository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Method;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -31,16 +30,11 @@ public abstract class VirtualThreadValidator implements Validator {
 
     @Override
     public void validate(Pain001Repository repository, ValidationContext context) {
-        if (isVirtualThreadsSupported()) {
-            runWithVirtualThread(repository, context);
-        } else {
-            doValidate(repository, context);
-        }
+        runWithVirtualThread(repository, context);
     }
 
     private void runWithVirtualThread(Pain001Repository repository, ValidationContext context) {
-        ExecutorService executor = createVirtualThreadExecutor();
-        try {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<?> future = executor.submit(() -> doValidate(repository, context));
             try {
                 future.get();
@@ -48,27 +42,6 @@ public abstract class VirtualThreadValidator implements Validator {
                 LOG.error("Virtual-thread validation failed: {}", e.getMessage(), e);
                 context.addError(getName(), "Validation failed with exception", e.getMessage());
             }
-        } finally {
-            executor.shutdown();
-        }
-    }
-
-    private static boolean isVirtualThreadsSupported() {
-        try {
-            Thread.class.getMethod("ofVirtual");
-            return true;
-        } catch (NoSuchMethodException e) {
-            return false;
-        }
-    }
-
-    private static ExecutorService createVirtualThreadExecutor() {
-        try {
-            Method method = Executors.class.getMethod("newVirtualThreadPerTaskExecutor");
-            return (ExecutorService) method.invoke(null);
-        } catch (Exception e) {
-            LOG.warn("Failed to create virtual thread executor, falling back to platform threads");
-            return Executors.newCachedThreadPool();
         }
     }
 }

@@ -136,6 +136,8 @@ public final class Pain001StaxParser {
         boolean inReqdExctnDt = false;
         boolean inDbtr = false; // direct Dbtr under PmtInf
         boolean inCdtr = false; // direct Cdtr under CdtTrfTxInf
+        boolean inRgltryRptg = false; // RgltryRptg under CdtTrfTxInf
+        boolean inRgltryRptgDtls = false; // Dtls under RgltryRptg
 
         // Temporary accumulators for current PmtInf fields
         String pmtMtd = null;
@@ -161,7 +163,8 @@ public final class Pain001StaxParser {
         String txCdtrAgtBicfi = null;
         String txCdtrNm = null;
         String txCdtrAcctIban = null;
-        String txRmtInfUstrd = null;
+        StringBuilder txRmtInfUstrd = null;   // accumulates multiple Ustrd lines
+        StringBuilder txRgltyRptgCd = null;   // accumulates multiple RgltryRptg/Dtls/Cd values
 
         long totalTx = 0;
         long totalRmt = 0;
@@ -192,6 +195,14 @@ public final class Pain001StaxParser {
                         case "Cdtr" -> {
                             if (inCdtTrfTxInf)
                                 inCdtr = true;
+                        }
+                        case "RgltryRptg" -> {
+                            if (inCdtTrfTxInf)
+                                inRgltryRptg = true;
+                        }
+                        case "Dtls" -> {
+                            if (inRgltryRptg)
+                                inRgltryRptgDtls = true;
                         }
                         case "InstdAmt" -> txCcy = reader.getAttributeValue(null, "Ccy");
                         default -> {
@@ -260,6 +271,15 @@ public final class Pain001StaxParser {
                         case "Cd" -> {
                             if (inPmtInf && !inCdtTrfTxInf && inSvcLvl)
                                 pmtSvcLvlCd = textContent.toString().trim();
+                            else if (inCdtTrfTxInf && inRgltryRptg && inRgltryRptgDtls) {
+                                String code = textContent.toString().trim();
+                                if (!code.isEmpty()) {
+                                    if (txRgltyRptgCd == null)
+                                        txRgltyRptgCd = new StringBuilder(code);
+                                    else
+                                        txRgltyRptgCd.append('\n').append(code);
+                                }
+                            }
                         }
                         case "Dt" -> {
                             if (inPmtInf && !inCdtTrfTxInf && inReqdExctnDt)
@@ -292,6 +312,14 @@ public final class Pain001StaxParser {
                         case "Cdtr" -> {
                             if (inCdtTrfTxInf)
                                 inCdtr = false;
+                        }
+                        case "Dtls" -> {
+                            if (inRgltryRptg)
+                                inRgltryRptgDtls = false;
+                        }
+                        case "RgltryRptg" -> {
+                            if (inCdtTrfTxInf)
+                                inRgltryRptg = false;
                         }
 
                         // ── PmtInf end → write remittance row ───────────
@@ -348,8 +376,16 @@ public final class Pain001StaxParser {
                             }
                         }
                         case "Ustrd" -> {
-                            if (inCdtTrfTxInf)
-                                txRmtInfUstrd = textContent.toString().trim();
+                            if (inCdtTrfTxInf) {
+                                String line = textContent.toString().trim();
+                                if (!line.isEmpty()) {
+                                    if (txRmtInfUstrd == null) {
+                                        txRmtInfUstrd = new StringBuilder(line);
+                                    } else {
+                                        txRmtInfUstrd.append('\n').append(line);
+                                    }
+                                }
+                            }
                         }
 
                         // ── CdtTrfTxInf end → write transaction row ────
@@ -362,7 +398,10 @@ public final class Pain001StaxParser {
                             setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_AGT_BICFI, txRow, txCdtrAgtBicfi);
                             setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_NM, txRow, txCdtrNm);
                             setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_ACCT_IBAN, txRow, txCdtrAcctIban);
-                            setVarChar(txRoot, Pain001ArrowSchema.TX_RMT_INF_USTRD, txRow, txRmtInfUstrd);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_RMT_INF_USTRD, txRow,
+                                    txRmtInfUstrd != null ? txRmtInfUstrd.toString() : null);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_RGLTY_RPTG_CD, txRow,
+                                    txRgltyRptgCd != null ? txRgltyRptgCd.toString() : null);
                             txRow++;
                             totalTx++;
 
@@ -375,6 +414,7 @@ public final class Pain001StaxParser {
                             txCdtrNm = null;
                             txCdtrAcctIban = null;
                             txRmtInfUstrd = null;
+                            txRgltyRptgCd = null;
                             inCdtTrfTxInf = false;
 
                             // Flush transaction batch if full

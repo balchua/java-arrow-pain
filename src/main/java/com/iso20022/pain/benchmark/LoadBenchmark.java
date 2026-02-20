@@ -165,11 +165,23 @@ public final class LoadBenchmark {
                     mbPerSecond));
         }
 
+        // ── DuckDB registration ─────────────────────────────────────────────
+        Duration duckdbDuration = phases.get("DuckDB Registration");
+        if (duckdbDuration != null) {
+            sb.append("╠══════════════════════════════════════════════════════════════╣\n");
+            sb.append("║  DUCKDB REGISTRATION                                       ║\n");
+            sb.append(String.format("║  Appender load time: %,10d ms                          ║%n",
+                    duckdbDuration.toMillis()));
+        }
+
         // ── Validation ──────────────────────────────────────────────────────
-        Duration valDuration = phases.get("CtrlSum Validate");
+        Duration valDuration = phases.get("SQL Validation");
+        if (valDuration == null) {
+            valDuration = phases.get("Validation");
+        }
         if (valDuration != null) {
             sb.append("╠══════════════════════════════════════════════════════════════╣\n");
-            sb.append("║  CONTROL SUM VALIDATION                                    ║\n");
+            sb.append("║  VALIDATION                                                ║\n");
             sb.append(String.format("║  Result           : %-40s ║%n",
                     validationPassed ? "✓ PASSED" : "✗ FAILED (" + validationErrors + " errors)"));
             sb.append(String.format("║  Remittances      : %,15d checked                  ║%n",
@@ -184,6 +196,22 @@ public final class LoadBenchmark {
                 sb.append(String.format("║  Scan throughput  : %,.0f rows/ms  (%,.0f M rows/sec)     ║%n",
                         rowsPerMs, rowsPerMs * 1000.0 / 1_000_000.0));
             }
+        }
+
+        // ── Legacy CtrlSum Validate phase (kept for backward compatibility) ──
+        Duration ctrlSumDuration = phases.get("CtrlSum Validate");
+        if (ctrlSumDuration != null) {
+            sb.append("╠══════════════════════════════════════════════════════════════╣\n");
+            sb.append("║  CONTROL SUM VALIDATION                                    ║\n");
+            sb.append(String.format("║  Result           : %-40s ║%n",
+                    validationPassed ? "✓ PASSED" : "✗ FAILED (" + validationErrors + " errors)"));
+            sb.append(String.format("║  Remittances      : %,15d checked                  ║%n",
+                    validationRemittances));
+            sb.append(String.format("║  Transactions     : %,15d scanned                  ║%n",
+                    validationTransactions));
+            double valMs = ctrlSumDuration.toNanos() / 1_000_000.0;
+            sb.append(String.format("║  Validation time  : %13.3f ms                        ║%n",
+                    valMs));
         }
 
         // ── Memory usage ────────────────────────────────────────────────────

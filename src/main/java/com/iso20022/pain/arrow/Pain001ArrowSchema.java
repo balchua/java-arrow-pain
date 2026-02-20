@@ -149,6 +149,8 @@ public final class Pain001ArrowSchema {
     public static final String TX_CDTR_ACCT_IBAN = "cdtr_acct_iban";
     /** RmtInf/Ustrd: Max140Text */
     public static final String TX_RMT_INF_USTRD = "rmt_inf_ustrd";
+    /** RgltryRptg/Dtls/Cd: newline-delimited regulatory reporting codes */
+    public static final String TX_RGLTY_RPTG_CD = "rglty_rptg_cd";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Schema factory methods
@@ -198,7 +200,8 @@ public final class Pain001ArrowSchema {
                 field(TX_CDTR_AGT_BICFI, UTF8, true),
                 field(TX_CDTR_NM, UTF8, false),
                 field(TX_CDTR_ACCT_IBAN, UTF8, false),
-                field(TX_RMT_INF_USTRD, UTF8, true)));
+                field(TX_RMT_INF_USTRD, UTF8, true),
+                field(TX_RGLTY_RPTG_CD, UTF8, true)));
     }
 
     private static Field field(String name, ArrowType type, boolean nullable) {

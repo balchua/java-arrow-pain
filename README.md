@@ -1,4 +1,4 @@
-# ISO 20022 pain.001 → Apache Arrow Loader
+# ISO 20022 pain.001 → Apache Arrow + DuckDB Loader
 
 A study project that parses ISO 20022 **pain.001.001.09** (CustomerCreditTransferInitiation) XML files into **Apache Arrow** columnar in-memory tables using a streaming StAX parser — with no DOM, no JAXB, and no intermediate POJOs.
 
@@ -8,8 +8,9 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
 
 | Component    | Version                                           |
 | ------------ | ------------------------------------------------- |
-| Java         | 21 (with virtual thread support)                 |
+| Java         | 17+ (virtual thread support via reflection on 21+) |
 | Apache Arrow | 15.0.2 (`arrow-vector`, `arrow-memory-unsafe`)    |
+| DuckDB       | 1.1.3 (`duckdb_jdbc`) — in-process SQL engine     |
 | XML Parser   | StAX (`javax.xml.stream`) — streaming pull parser |
 | Build        | Maven 3.9.6                                       |
 | Logging      | SLF4J 2.0.12                                      |
@@ -66,18 +67,20 @@ src/main/java/com/iso20022/pain/
 │   ├── Pain001XmlGenerator.java      # Generates valid pain.001.001.09 XML via StAX
 │   ├── IndentingXMLStreamWriter.java  # Pretty-printing decorator for XMLStreamWriter
 │   └── SampleFileSpec.java           # Test file specifications (Type A/B/C)
+├── dal/
+│   └── Pain001Repository.java        # DuckDB DAL — loads Arrow into DuckDB, exposes SQL API
 ├── validation/
-│   ├── Validator.java                # Base interface for all validators
+│   ├── Validator.java                # Base interface for all validators (uses Pain001Repository)
 │   ├── ValidationContext.java        # Thread-safe error/warning collection
 │   ├── ValidationPipeline.java       # Fluent builder with virtual thread support
 │   ├── ExecutionMode.java            # SEQUENTIAL, PARALLEL, AUTO modes
 │   ├── ChainedValidator.java         # andThen() implementation
-│   ├── VirtualThreadValidator.java   # Abstract base for batch-level parallelism
+│   ├── VirtualThreadValidator.java   # Abstract base for virtual thread execution
 │   └── validators/
-│       ├── MessageValidator.java     # Validates message-level fields
-│       ├── RemittanceValidator.java  # Validates IBAN, payment methods
-│       ├── TransactionValidator.java # Validates amounts, creditor names
-│       ├── ControlSumValidator.java  # Validates control sums (refactored)
+│       ├── MessageValidator.java     # SQL: MsgId length, InitgPty, CreDtTm
+│       ├── RemittanceValidator.java  # SQL: IBAN format, payment method
+│       ├── TransactionValidator.java # SQL: amounts > 0, creditor names
+│       ├── ControlSumValidator.java  # SQL: JOIN-based control sum validation
 │       └── ParallelTransactionValidator.java  # Batch-parallel transaction validator
 └── benchmark/
     └── LoadBenchmark.java            # Timing, memory tracking, formatted report
@@ -176,21 +179,19 @@ ValidationPipeline
 ### Usage
 
 ```java
-// Standard pipeline with all validators
-ValidationContext ctx = ValidationPipeline.standard()
-    .execute(arrowBatchResult);
+// Standard pipeline with all validators (repository provides SQL access)
+try (Pain001Repository repo = new Pain001Repository(arrowBatchResult)) {
+    ValidationContext ctx = ValidationPipeline.standard().execute(repo);
+}
 
 // Custom pipeline
-ValidationContext ctx = ValidationPipeline.create()
-    .add(new MessageValidator())
-    .add(new RemittanceValidator())
-    .withExecutionMode(ExecutionMode.PARALLEL)
-    .execute(arrowBatchResult);
-
-// Manual chaining
-Validator chain = new MessageValidator()
-    .andThen(new RemittanceValidator())
-    .andThen(new ControlSumValidator());
+try (Pain001Repository repo = new Pain001Repository(arrowBatchResult)) {
+    ValidationContext ctx = ValidationPipeline.create()
+        .add(new MessageValidator())
+        .add(new RemittanceValidator())
+        .withExecutionMode(ExecutionMode.PARALLEL)
+        .execute(repo);
+}
 ```
 
 ### Performance

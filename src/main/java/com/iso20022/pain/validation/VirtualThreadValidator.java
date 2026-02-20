@@ -1,134 +1,47 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
-import org.apache.arrow.vector.VectorSchemaRoot;
+import com.iso20022.pain.dal.Pain001Repository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Abstract base class for validators that use virtual threads for batch-level parallelism.
- * 
- * <p>Subclasses define how to extract batches and validate each batch. This class
- * handles the parallel execution using virtual threads when available.</p>
+ * Abstract base class for validators that optionally use virtual threads.
+ *
+ * <p>Subclasses implement {@link #doValidate(Pain001Repository, ValidationContext)}
+ * to perform the actual SQL-based validation. DuckDB's vectorised query engine
+ * handles internal parallelism, so this class simply provides a hook for
+ * running the validation on a virtual thread when desired.</p>
  */
 public abstract class VirtualThreadValidator implements Validator {
 
     private static final Logger LOG = LoggerFactory.getLogger(VirtualThreadValidator.class);
 
     /**
-     * Extracts batches from the Arrow result for parallel processing.
+     * Performs the actual validation using the repository.
      *
-     * @param result the Arrow batch result
-     * @return list of batches to process in parallel
+     * @param repository the SQL-based DAL
+     * @param context    the validation context
      */
-    protected abstract List<VectorSchemaRoot> getBatches(ArrowBatchResult result);
-
-    /**
-     * Validates a single batch.
-     *
-     * @param batch the batch to validate
-     * @param batchIndex the index of this batch
-     * @param context the validation context
-     */
-    protected abstract void validateBatch(VectorSchemaRoot batch, int batchIndex, ValidationContext context);
+    protected abstract void doValidate(Pain001Repository repository, ValidationContext context);
 
     @Override
-    public void validate(ArrowBatchResult result, ValidationContext context) {
-        List<VectorSchemaRoot> batches = getBatches(result);
-        
-        if (batches.isEmpty()) {
-            return;
-        }
-
-        if (batches.size() == 1) {
-            // Single batch, no need for parallelism
-            validateBatch(batches.get(0), 0, context);
-            return;
-        }
-
-        // Use virtual threads if available
-        if (isVirtualThreadsSupported()) {
-            executeWithVirtualThreads(batches, context);
-        } else {
-            executeWithPlatformThreads(batches, context);
-        }
+    public void validate(Pain001Repository repository, ValidationContext context) {
+        runWithVirtualThread(repository, context);
     }
 
-    private void executeWithVirtualThreads(List<VectorSchemaRoot> batches, ValidationContext context) {
-        try (ExecutorService executor = createVirtualThreadExecutor()) {
-            List<Future<?>> futures = new ArrayList<>();
-            
-            for (int i = 0; i < batches.size(); i++) {
-                final int batchIndex = i;
-                final VectorSchemaRoot batch = batches.get(i);
-                Future<?> future = executor.submit(() -> {
-                    validateBatch(batch, batchIndex, context);
-                });
-                futures.add(future);
+    private void runWithVirtualThread(Pain001Repository repository, ValidationContext context) {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<?> future = executor.submit(() -> doValidate(repository, context));
+            try {
+                future.get();
+            } catch (Exception e) {
+                LOG.error("Virtual-thread validation failed: {}", e.getMessage(), e);
+                context.addError(getName(), "Validation failed with exception", e.getMessage());
             }
-
-            // Wait for all to complete
-            for (Future<?> future : futures) {
-                try {
-                    future.get();
-                } catch (Exception e) {
-                    LOG.error("Batch validation failed: {}", e.getMessage(), e);
-                    context.addError(getName(), "Batch validation failed", e.getMessage());
-                }
-            }
-        }
-    }
-
-    private void executeWithPlatformThreads(List<VectorSchemaRoot> batches, ValidationContext context) {
-        try (ExecutorService executor = Executors.newFixedThreadPool(
-                Math.min(batches.size(), Runtime.getRuntime().availableProcessors()))) {
-            
-            List<Future<?>> futures = new ArrayList<>();
-            
-            for (int i = 0; i < batches.size(); i++) {
-                final int batchIndex = i;
-                final VectorSchemaRoot batch = batches.get(i);
-                Future<?> future = executor.submit(() -> {
-                    validateBatch(batch, batchIndex, context);
-                });
-                futures.add(future);
-            }
-
-            // Wait for all to complete
-            for (Future<?> future : futures) {
-                try {
-                    future.get();
-                } catch (Exception e) {
-                    LOG.error("Batch validation failed: {}", e.getMessage(), e);
-                    context.addError(getName(), "Batch validation failed", e.getMessage());
-                }
-            }
-        }
-    }
-
-    private static boolean isVirtualThreadsSupported() {
-        try {
-            Thread.class.getMethod("ofVirtual");
-            return true;
-        } catch (NoSuchMethodException e) {
-            return false;
-        }
-    }
-
-    private static ExecutorService createVirtualThreadExecutor() {
-        try {
-            Method method = Executors.class.getMethod("newVirtualThreadPerTaskExecutor");
-            return (ExecutorService) method.invoke(null);
-        } catch (Exception e) {
-            LOG.warn("Failed to create virtual thread executor, falling back to platform threads");
-            return Executors.newCachedThreadPool();
         }
     }
 }

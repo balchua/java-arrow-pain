@@ -1,6 +1,6 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.dal.Pain001Repository;
 import com.iso20022.pain.validation.validators.ControlSumValidator;
 import com.iso20022.pain.validation.validators.MessageValidator;
 import com.iso20022.pain.validation.validators.RemittanceValidator;
@@ -8,7 +8,6 @@ import com.iso20022.pain.validation.validators.TransactionValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +17,7 @@ import java.util.concurrent.Future;
 
 /**
  * Fluent builder API for composing and executing validation pipelines.
- * 
+ *
  * <p>Supports parallel execution of independent validators using virtual threads
  * on Java 21+ with automatic fallback to platform threads on older versions.</p>
  */
@@ -33,7 +32,7 @@ public final class ValidationPipeline {
     private ValidationPipeline() {
         this.validators = new ArrayList<>();
         this.executionMode = ExecutionMode.AUTO;
-        this.useVirtualThreads = isVirtualThreadsSupported();
+        this.useVirtualThreads = true;
     }
 
     /**
@@ -58,7 +57,7 @@ public final class ValidationPipeline {
     /**
      * Creates a standard validation pipeline with all default validators.
      *
-     * @return a pipeline with MessageValidator, RemittanceValidator, 
+     * @return a pipeline with MessageValidator, RemittanceValidator,
      *         TransactionValidator, and ControlSumValidator
      */
     public static ValidationPipeline standard() {
@@ -111,17 +110,17 @@ public final class ValidationPipeline {
      * @return this pipeline for chaining
      */
     public ValidationPipeline withVirtualThreads(boolean enabled) {
-        this.useVirtualThreads = enabled && isVirtualThreadsSupported();
+        this.useVirtualThreads = enabled;
         return this;
     }
 
     /**
-     * Executes the validation pipeline on the given Arrow result.
+     * Executes the validation pipeline using the given repository.
      *
-     * @param result the Arrow batch result to validate
+     * @param repository the SQL-based DAL providing access to the pain.001 tables
      * @return the validation context with all errors and warnings
      */
-    public ValidationContext execute(ArrowBatchResult result) {
+    public ValidationContext execute(Pain001Repository repository) {
         ValidationContext context = new ValidationContext();
         Instant start = Instant.now();
 
@@ -131,7 +130,7 @@ public final class ValidationPipeline {
         // Separate parallelizable and sequential validators
         List<Validator> parallelizable = new ArrayList<>();
         List<Validator> sequential = new ArrayList<>();
-        
+
         for (Validator v : validators) {
             if (v.isParallelizable()) {
                 parallelizable.add(v);
@@ -149,20 +148,20 @@ public final class ValidationPipeline {
             if (actualMode == ExecutionMode.PARALLEL && parallelizable.size() > 1) {
                 // Execute parallelizable validators concurrently
                 if (useVirtualThreads) {
-                    executeWithVirtualThreads(result, context, parallelizable);
+                    executeWithVirtualThreads(repository, context, parallelizable);
                 } else {
-                    executeWithPlatformThreads(result, context, parallelizable);
+                    executeWithPlatformThreads(repository, context, parallelizable);
                 }
             } else {
                 // Execute all parallelizable validators sequentially
                 for (Validator v : parallelizable) {
-                    executeValidator(v, result, context);
+                    executeValidator(v, repository, context);
                 }
             }
 
             // Always execute sequential validators after parallel ones complete
             for (Validator v : sequential) {
-                executeValidator(v, result, context);
+                executeValidator(v, repository, context);
             }
 
         } catch (Exception e) {
@@ -186,21 +185,17 @@ public final class ValidationPipeline {
         return executionMode;
     }
 
-    private void executeWithVirtualThreads(ArrowBatchResult result, ValidationContext context,
+    private void executeWithVirtualThreads(Pain001Repository repository, ValidationContext context,
             List<Validator> validators) {
         LOG.debug("Using virtual threads for {} parallel validators", validators.size());
-        
-        try (ExecutorService executor = createVirtualThreadExecutor()) {
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<?>> futures = new ArrayList<>();
-            
+
             for (Validator v : validators) {
-                Future<?> future = executor.submit(() -> {
-                    executeValidator(v, result, context);
-                });
-                futures.add(future);
+                futures.add(executor.submit(() -> executeValidator(v, repository, context)));
             }
 
-            // Wait for all to complete
             for (Future<?> future : futures) {
                 try {
                     future.get();
@@ -212,23 +207,18 @@ public final class ValidationPipeline {
         }
     }
 
-    private void executeWithPlatformThreads(ArrowBatchResult result, ValidationContext context,
+    private void executeWithPlatformThreads(Pain001Repository repository, ValidationContext context,
             List<Validator> validators) {
         LOG.debug("Using platform threads for {} parallel validators", validators.size());
-        
+
         try (ExecutorService executor = Executors.newFixedThreadPool(
                 Math.min(validators.size(), Runtime.getRuntime().availableProcessors()))) {
-            
             List<Future<?>> futures = new ArrayList<>();
-            
+
             for (Validator v : validators) {
-                Future<?> future = executor.submit(() -> {
-                    executeValidator(v, result, context);
-                });
-                futures.add(future);
+                futures.add(executor.submit(() -> executeValidator(v, repository, context)));
             }
 
-            // Wait for all to complete
             for (Future<?> future : futures) {
                 try {
                     future.get();
@@ -240,39 +230,16 @@ public final class ValidationPipeline {
         }
     }
 
-    private void executeValidator(Validator validator, ArrowBatchResult result, ValidationContext context) {
+    private void executeValidator(Validator validator, Pain001Repository repository,
+            ValidationContext context) {
         Instant start = Instant.now();
         try {
-            validator.validate(result, context);
+            validator.validate(repository, context);
             long elapsed = Instant.now().toEpochMilli() - start.toEpochMilli();
             LOG.debug("  ✓ {} completed in {} ms", validator.getName(), elapsed);
         } catch (Exception e) {
             LOG.error("  ✗ {} failed: {}", validator.getName(), e.getMessage(), e);
             context.addError(validator.getName(), "Validation failed with exception", e.getMessage());
-        }
-    }
-
-    private static boolean isVirtualThreadsSupported() {
-        try {
-            // Check if we're running on Java 21+
-            Method ofVirtualMethod = Thread.class.getMethod("ofVirtual");
-            LOG.debug("Virtual threads are supported (Java 21+)");
-            return true;
-        } catch (NoSuchMethodException e) {
-            LOG.debug("Virtual threads not supported (Java < 21)");
-            return false;
-        }
-    }
-
-    private static ExecutorService createVirtualThreadExecutor() {
-        try {
-            // Use reflection to call Executors.newVirtualThreadPerTaskExecutor()
-            Method method = Executors.class.getMethod("newVirtualThreadPerTaskExecutor");
-            return (ExecutorService) method.invoke(null);
-        } catch (Exception e) {
-            LOG.warn("Failed to create virtual thread executor, falling back to platform threads: {}", 
-                    e.getMessage());
-            return Executors.newCachedThreadPool();
         }
     }
 }

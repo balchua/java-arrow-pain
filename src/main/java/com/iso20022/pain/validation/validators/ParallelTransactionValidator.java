@@ -1,74 +1,38 @@
 package com.iso20022.pain.validation.validators;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
-import com.iso20022.pain.arrow.Pain001ArrowSchema;
+import com.iso20022.pain.dal.Pain001Repository;
+import com.iso20022.pain.dal.Pain001Repository.Issue;
 import com.iso20022.pain.validation.ValidationContext;
 import com.iso20022.pain.validation.VirtualThreadValidator;
-import org.apache.arrow.vector.DecimalVector;
-import org.apache.arrow.vector.VarCharVector;
-import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.util.List;
 
 /**
- * Validates transaction-level fields using virtual threads for batch-level parallelism.
- * 
- * <p>Each transaction batch is processed in its own virtual thread, allowing
- * efficient parallel validation of large datasets.</p>
- * 
- * <p>Same validation logic as {@link TransactionValidator} but with parallel batch processing.</p>
+ * Validates transaction-level fields via SQL using a virtual thread,
+ * delegating to the same SQL logic as {@link TransactionValidator}.
+ *
+ * <p>DuckDB's vectorised engine handles internal parallelism; this class
+ * demonstrates running the validation task on a virtual thread.</p>
  */
 public final class ParallelTransactionValidator extends VirtualThreadValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(ParallelTransactionValidator.class);
 
     @Override
-    protected List<VectorSchemaRoot> getBatches(ArrowBatchResult result) {
-        return result.getTransactionBatches();
-    }
-
-    @Override
-    protected void validateBatch(VectorSchemaRoot txBatch, int batchIndex, ValidationContext context) {
-        DecimalVector amtVec = (DecimalVector) txBatch.getVector(
-                Pain001ArrowSchema.TX_INSTD_AMT);
-        VarCharVector cdtrVec = (VarCharVector) txBatch.getVector(
-                Pain001ArrowSchema.TX_CDTR_NM);
-        VarCharVector instrIdVec = (VarCharVector) txBatch.getVector(
-                Pain001ArrowSchema.TX_INSTR_ID);
-
-        int rows = txBatch.getRowCount();
-        int errorCount = 0;
-
-        for (int i = 0; i < rows; i++) {
-            String instrId = instrIdVec.isNull(i) ? "unknown" 
-                    : new String(instrIdVec.get(i), StandardCharsets.UTF_8);
-
-            // Validate amount is positive
-            if (!amtVec.isNull(i)) {
-                BigDecimal amt = amtVec.getObject(i);
-                if (amt.compareTo(BigDecimal.ZERO) <= 0) {
-                    errorCount++;
-                    context.addError(getName(), 
-                            "Amount must be positive", 
-                            "Batch=" + batchIndex + ", InstrId=" + instrId + ", Amount=" + amt);
-                }
+    protected void doValidate(Pain001Repository repository, ValidationContext context) {
+        try {
+            List<Issue> issues = repository.validateTransactionFields();
+            for (Issue issue : issues) {
+                context.addError(getName(), issue.message(), issue.id());
             }
-
-            // Validate creditor name
-            if (cdtrVec.isNull(i)) {
-                errorCount++;
-                context.addError(getName(), 
-                        "Creditor name is required", 
-                        "Batch=" + batchIndex + ", InstrId=" + instrId);
-            }
+            LOG.debug("{} completed: {} issue(s)", getName(), issues.size());
+        } catch (SQLException e) {
+            LOG.error("{} failed: {}", getName(), e.getMessage(), e);
+            context.addError(getName(), "SQL validation failed", e.getMessage());
         }
-
-        LOG.debug("{} batch {} completed: {} rows, {} errors", 
-                getName(), batchIndex, rows, errorCount);
     }
 
     @Override

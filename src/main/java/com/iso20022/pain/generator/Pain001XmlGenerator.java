@@ -59,6 +59,9 @@ public final class Pain001XmlGenerator {
             "Acme Corporation", "Global Industries Ltd", "Smith Trading Co",
             "EuroPayments GmbH", "Nordic Supplies AB", "Atlantic Services SA"
     };
+    private static final String[] REGULATORY_CODES = {
+            "BENEFICIARY_RESIDENT", "RESIDENT", "NONRESIDENT", "REGLF001", "REGLF002"
+    };
 
     private Pain001XmlGenerator() {
         // utility class
@@ -282,11 +285,23 @@ public final class Pain001XmlGenerator {
         writer.writeEndElement(); // Id
         writer.writeEndElement(); // CdtrAcct
 
-        // RmtInf/Ustrd
+        // RmtInf — 2 Ustrd lines (ISO 20022 allows up to 140; realistic messages use a few)
         writer.writeStartElement("RmtInf");
         writeElement(writer, "Ustrd",
                 String.format("Invoice PMT%06d-TX%07d", pmtIndex + 1, txIndex + 1));
+        writeElement(writer, "Ustrd",
+                String.format("Ref %s/%s", CREDITOR_NAMES[credIdx].replaceAll("\\s+", "-"), txIndex + 1));
         writer.writeEndElement(); // RmtInf
+
+        // RgltryRptg — 2 Dtls/Cd entries (parser supports up to ~10; stored flat, newline-delimited)
+        writer.writeStartElement("RgltryRptg");
+        writer.writeStartElement("Dtls");
+        writeElement(writer, "Cd", REGULATORY_CODES[txIndex % REGULATORY_CODES.length]);
+        writer.writeEndElement(); // Dtls
+        writer.writeStartElement("Dtls");
+        writeElement(writer, "Cd", REGULATORY_CODES[(txIndex + 1) % REGULATORY_CODES.length]);
+        writer.writeEndElement(); // Dtls
+        writer.writeEndElement(); // RgltryRptg
 
         writer.writeEndElement(); // CdtTrfTxInf
     }

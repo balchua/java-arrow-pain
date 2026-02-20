@@ -1,23 +1,24 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.dal.Pain001Repository;
 
 /**
  * Base interface for all validators in the chainable validation framework.
- * 
+ *
  * <p>Validators can be chained together using {@link #andThen(Validator)} to create
- * validation pipelines. Each validator operates on Arrow data without copying it to
- * intermediate POJOs, maintaining memory efficiency.</p>
+ * validation pipelines. Each validator queries the {@link Pain001Repository} via SQL
+ * — no Apache Arrow API is used directly inside validator implementations.</p>
  */
 public interface Validator {
 
     /**
-     * Validates the Arrow batch result and reports errors/warnings to the context.
+     * Validates data via the repository and reports errors/warnings to the context.
      *
-     * @param result the Arrow batch result containing message, remittance, and transaction data
-     * @param context the validation context for collecting errors and warnings
+     * @param repository the SQL-based DAL providing access to message, remittance,
+     *                   and transaction data
+     * @param context    the validation context for collecting errors and warnings
      */
-    void validate(ArrowBatchResult result, ValidationContext context);
+    void validate(Pain001Repository repository, ValidationContext context);
 
     /**
      * Indicates whether this validator can be run in parallel with other parallelizable validators.

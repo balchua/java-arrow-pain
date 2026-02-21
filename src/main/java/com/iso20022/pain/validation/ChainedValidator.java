@@ -1,10 +1,10 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.dal.Pain001Repository;
+import com.iso20022.pain.dal.PaymentRepository;
 
 /**
  * Internal implementation for chaining validators together.
- * 
+ *
  * <p>This validator executes two validators in sequence and combines their
  * parallelizability status (both must be parallelizable for the chain to be).</p>
  */
@@ -19,7 +19,7 @@ final class ChainedValidator implements Validator {
     }
 
     @Override
-    public void validate(Pain001Repository repository, ValidationContext context) {
+    public void validate(PaymentRepository repository, ValidationContext context) {
         first.validate(repository, context);
         second.validate(repository, context);
     }

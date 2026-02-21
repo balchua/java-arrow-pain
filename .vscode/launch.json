@@ -1,0 +1,59 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "App: Run (parse existing XML file)",
+            "request": "launch",
+            "mainClass": "com.iso20022.pain.App",
+            "projectName": "pain001-arrow-loader",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g",
+            "args": "src/main/resources/sample-data/pain001_type_a_1x1M.xml"
+        },
+        {
+            "type": "java",
+            "name": "Test: Generate Type D (2×100 valid)",
+            "request": "launch",
+            "mainClass": "com.iso20022.pain.SampleGeneratorRunner",
+            "projectName": "pain001-arrow-loader",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g",
+            "args": "type-d"
+        },
+        {
+            "type": "java",
+            "name": "Test: Generate Type E (2×100 invalid CtrlSum)",
+            "request": "launch",
+            "mainClass": "com.iso20022.pain.SampleGeneratorRunner",
+            "projectName": "pain001-arrow-loader",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g",
+            "args": "type-e"
+        },
+        {
+            "type": "java",
+            "name": "Test: Generate All Sample Files (A–E)",
+            "request": "launch",
+            "mainClass": "com.iso20022.pain.SampleGeneratorRunner",
+            "projectName": "pain001-arrow-loader",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g",
+            "args": ""
+        },
+        {
+            "type": "java",
+            "name": "Test: Run SampleGenerationTest (JUnit 5)",
+            "request": "launch",
+            "mainClass": "org.junit.platform.console.ConsoleLauncher",
+            "projectName": "pain001-arrow-loader",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g",
+            "args": "--select-class=com.iso20022.pain.SampleGenerationTest"
+        },
+        {
+            "type": "java",
+            "name": "Test: Run ArrowFileLoadBenchmarkTest (JUnit 5)",
+            "request": "launch",
+            "mainClass": "org.junit.platform.console.ConsoleLauncher",
+            "projectName": "pain001-arrow-loader",
+            "vmArgs": "--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g",
+            "args": "--select-class=com.iso20022.pain.ArrowFileLoadBenchmarkTest"
+        }
+    ]
+}

@@ -1,12 +1,12 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.dal.Pain001Repository;
+import com.iso20022.pain.dal.PaymentRepository;
 
 /**
  * Base interface for all validators in the chainable validation framework.
  *
  * <p>Validators can be chained together using {@link #andThen(Validator)} to create
- * validation pipelines. Each validator queries the {@link Pain001Repository} via SQL
+ * validation pipelines. Each validator queries the {@link PaymentRepository} via SQL
  * — no Apache Arrow API is used directly inside validator implementations.</p>
  */
 public interface Validator {
@@ -18,11 +18,11 @@ public interface Validator {
      *                   and transaction data
      * @param context    the validation context for collecting errors and warnings
      */
-    void validate(Pain001Repository repository, ValidationContext context);
+    void validate(PaymentRepository repository, ValidationContext context);
 
     /**
      * Indicates whether this validator can be run in parallel with other parallelizable validators.
-     * 
+     *
      * @return true if this validator is safe to run in parallel, false if it must run sequentially
      */
     default boolean isParallelizable() {

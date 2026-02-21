@@ -1,6 +1,6 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.dal.Pain001Repository;
+import com.iso20022.pain.dal.PaymentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,10 +11,8 @@ import java.util.concurrent.Future;
 /**
  * Abstract base class for validators that optionally use virtual threads.
  *
- * <p>Subclasses implement {@link #doValidate(Pain001Repository, ValidationContext)}
- * to perform the actual SQL-based validation. DuckDB's vectorised query engine
- * handles internal parallelism, so this class simply provides a hook for
- * running the validation on a virtual thread when desired.</p>
+ * <p>Subclasses implement {@link #doValidate(PaymentRepository, ValidationContext)}
+ * to perform the actual SQL-based validation.</p>
  */
 public abstract class VirtualThreadValidator implements Validator {
 
@@ -26,14 +24,14 @@ public abstract class VirtualThreadValidator implements Validator {
      * @param repository the SQL-based DAL
      * @param context    the validation context
      */
-    protected abstract void doValidate(Pain001Repository repository, ValidationContext context);
+    protected abstract void doValidate(PaymentRepository repository, ValidationContext context);
 
     @Override
-    public void validate(Pain001Repository repository, ValidationContext context) {
+    public void validate(PaymentRepository repository, ValidationContext context) {
         runWithVirtualThread(repository, context);
     }
 
-    private void runWithVirtualThread(Pain001Repository repository, ValidationContext context) {
+    private void runWithVirtualThread(PaymentRepository repository, ValidationContext context) {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<?> future = executor.submit(() -> doValidate(repository, context));
             try {

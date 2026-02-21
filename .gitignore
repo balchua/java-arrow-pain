@@ -1,10 +1,12 @@
 target/
 
-# Large generated sample data (regenerate with: mvn exec:java -Dexec.args="generate")
+# Large generated sample data (regenerate with SampleGeneratorRunner or mvn test)
 src/main/resources/sample-data/pain001_type_*.xml
+src/test/resources/sample-data/pain001_type_*.xml
 
 # Arrow IPC output files
 src/main/resources/output/*.arrow
+src/test/resources/output/*.arrow
 
 # Test results (logs only, keep TEST_RESULTS.md)
 test-results/*.log

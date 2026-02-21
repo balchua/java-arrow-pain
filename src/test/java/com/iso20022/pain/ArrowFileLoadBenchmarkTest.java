@@ -169,7 +169,7 @@ class ArrowFileLoadBenchmarkTest {
             String arrowKb = String.format("%,d", r.arrowFileSizeBytes() / 1024);
             String loadMs  = String.format("%,d", r.loadTimeMs());
             String rps     = String.format("%,d", rowsPerSec);
-            String label   = truncate(r.label().replaceAll(".*\\(", "").replaceAll("\\).*", ""), 12);
+            String label   = truncate(r.label().replaceAll("\\s*\\(.*", "").trim(), 12);
             String notes   = truncate(r.notes(), 23);
             System.out.printf("║  %-12s ║ %8s ║ %9s ║ %12s ║ %-23s ║%n",
                     label, arrowKb, loadMs, rps, notes);

@@ -151,13 +151,6 @@ public final class App {
 
                     benchmark.setOffHeapPeakBytes(allocator.getPeakMemoryAllocation());
                 }
-            } catch (IllegalStateException e) {
-                if (e.getMessage() != null && e.getMessage().startsWith("Memory was leaked")) {
-                    LOG.debug("Arrow allocator residual from DuckDB C Data Interface (expected): {}",
-                            e.getMessage().lines().findFirst().orElse(""));
-                } else {
-                    throw e;
-                }
             }
 
             benchmark.setHeapUsedAfterBytes(LoadBenchmark.captureHeapUsed());

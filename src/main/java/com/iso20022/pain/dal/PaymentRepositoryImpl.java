@@ -39,6 +39,8 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
 
     private final DuckDBConnection conn;
     private final BufferAllocator allocator;
+    /** Arrow C Data Interface resources held open until after conn.close(). */
+    private final List<AutoCloseable> deferredCloseables = new ArrayList<>();
 
     /**
      * Opens an in-process DuckDB database and loads the Arrow batch result into
@@ -51,7 +53,9 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
     public PaymentRepositoryImpl(ArrowBatchResult result, BufferAllocator allocator) throws Exception {
         this.allocator = allocator;
         this.conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
-        conn.createStatement().execute("SET memory_limit='" + DUCKDB_MEMORY_LIMIT + "'");
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("SET memory_limit='" + DUCKDB_MEMORY_LIMIT + "'");
+        }
 
         loadViaStream("message",      List.of(result.getMessageRoot()));
         loadViaStream("remittance",   result.getRemittanceBatches());
@@ -65,18 +69,40 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
     private void loadViaStream(String tableName, List<VectorSchemaRoot> batches)
             throws Exception {
 
-        try (BatchArrowReader reader = new BatchArrowReader(batches, allocator);
-             ArrowArrayStream stream = ArrowArrayStream.allocateNew(allocator)) {
-
+        // Reader and stream are intentionally NOT closed here.
+        // DuckDB's registerArrowStream transfers C Data Interface ownership of the
+        // stream struct to DuckDB. The release callback (which frees Arrow allocator
+        // memory) is only invoked when DuckDB drops the scan — i.e. during conn.close().
+        // Closing them before conn.close() would free memory DuckDB still needs.
+        // They are stored in deferredCloseables and closed in close() after conn.close().
+        BatchArrowReader reader = new BatchArrowReader(batches, allocator);
+        ArrowArrayStream stream = ArrowArrayStream.allocateNew(allocator);
+        try {
             Data.exportArrayStream(allocator, reader, stream);
 
             String tmpName = "_tmp_" + tableName;
             conn.registerArrowStream(tmpName, stream);
-            conn.createStatement().execute(
-                    "CREATE TABLE " + tableName + " AS SELECT * FROM " + tmpName);
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("CREATE TABLE " + tableName + " AS SELECT * FROM " + tmpName);
+            }
+            deferredCloseables.add(stream);
+            deferredCloseables.add(reader);
+        } catch (Exception e) {
+            // Export or registration failed — DuckDB never took ownership, close now.
+            closeSilently(stream);
+            closeSilently(reader);
+            throw e;
         }
 
         LOG.debug("Loaded '{}': {} batch(es) via direct-batch Arrow stream", tableName, batches.size());
+    }
+
+    private static void closeSilently(AutoCloseable c) {
+        try {
+            c.close();
+        } catch (Exception e) {
+            LOG.warn("Error closing Arrow resource: {}", e.getMessage());
+        }
     }
 
     private static final class BatchArrowReader extends ArrowReader {
@@ -85,6 +111,7 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
         private final VectorSchemaRoot sharedRoot;
         private int nextIndex = 0;
         private long totalBytesRead = 0L;
+        private boolean closed = false;
 
         BatchArrowReader(List<VectorSchemaRoot> batches, BufferAllocator allocator) {
             super(allocator);
@@ -126,9 +153,16 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
             return totalBytesRead;
         }
 
+        /**
+         * Idempotent close — DuckDB's C Data Interface release callback may call this,
+         * and our deferred close in {@link PaymentRepositoryImpl#close()} calls it too.
+         */
         @Override
-        public void close() throws IOException {
-            sharedRoot.close();
+        public synchronized void close() throws IOException {
+            if (!closed) {
+                closed = true;
+                sharedRoot.close();
+            }
         }
 
         @Override
@@ -366,7 +400,14 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
 
     @Override
     public void close() throws Exception {
+        // Close DuckDB connection FIRST — this invokes all C Data Interface release
+        // callbacks synchronously, freeing DuckDB's references to the Arrow stream structs.
         conn.close();
+        // THEN close the Arrow stream objects. The release callbacks have already fired,
+        // so the Arrow allocator can reclaim the memory without conflict.
+        for (AutoCloseable c : deferredCloseables) {
+            closeSilently(c);
+        }
         LOG.debug("PaymentRepositoryImpl closed");
     }
 }

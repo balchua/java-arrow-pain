@@ -9,7 +9,7 @@ import java.nio.file.Paths;
 
 /**
  * Test utility for generating pain.001 sample files.
- * Skips generation if the file already exists and is complete (ends with &lt;/Document&gt;).
+ * Skips generation if the file already exists and is complete (ends with {@code </Document>}).
  * This is the ONLY place where file-existence checks are performed.
  */
 public final class TestFileGenerator {

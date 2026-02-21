@@ -66,12 +66,6 @@ public final class SampleGeneratorRunner {
                         }
                     }
                 }
-            } catch (IllegalStateException e) {
-                if (e.getMessage() != null && e.getMessage().startsWith("Memory was leaked")) {
-                    // expected DuckDB C Data Interface residual
-                } else {
-                    throw e;
-                }
             }
             System.out.println();
         }

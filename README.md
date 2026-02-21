@@ -193,105 +193,15 @@ See [TEST_RESULTS.md](TEST_RESULTS.md) for detailed performance comparison and t
 
 ---
 
-## Study Results
+## Performance Results
 
-All benchmarks run with **-Xmx1g** heap on a single thread, using **pretty-printed (formatted) XML** files to simulate real-world client input. Arrow off-heap allocator capped at 2 GB. Batch size: 65,536 rows per `VectorSchemaRoot`.
+See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
 
-### 1. Storage: XML vs Arrow IPC on Disk
-
-| File            | XML Size (formatted) | Arrow IPC Size | Reduction         |
-| --------------- | -------------------- | -------------- | ----------------- |
-| Type A (1×1M)   | 622.9 MB             | 170.0 MB       | **72.7% smaller** |
-| Type B (2×500K) | 622.9 MB             | 170.0 MB       | **72.7% smaller** |
-| Type C (1M×1)   | 1,198.9 MB           | 308.6 MB       | **74.3% smaller** |
-
-Arrow IPC files are consistently **72–74% smaller** than the formatted source XML. XML carries enormous per-element tag overhead (`<CdtTrfTxInf>`, `<PmtId>`, `<InstrId>`, etc.) plus indentation whitespace that Arrow eliminates by storing columnar binary data with compact metadata.
-
-Type C’s higher reduction (74.3%) comes from the XML having to repeat debtor/account/agent elements for every one of its 1M remittance blocks — overhead that Arrow’s columnar layout absorbs efficiently.
-
-### 2. Memory Efficiency
-
-| File   | XML Size   | Arrow Off-Heap | Java Heap | Combined Peak | Combined vs XML |
-| ------ | ---------- | -------------- | --------- | ------------- | --------------- |
-| Type A | 622.9 MB   | 279.3 MB       | 136.9 MB  | 416.2 MB      | −33.2%          |
-| Type B | 622.9 MB   | 279.3 MB       | 31.9 MB   | 311.2 MB      | −50.0%          |
-| Type C | 1,198.9 MB | 493.5 MB       | 278.8 MB  | 772.3 MB      | −35.6%          |
-
-**Arrow off-heap memory alone:**
-
-| File   | XML Size   | Arrow Off-Heap | Off-Heap vs XML Size |
-| ------ | ---------- | -------------- | -------------------- |
-| Type A | 622.9 MB   | 279.3 MB       | **55% less**         |
-| Type B | 622.9 MB   | 279.3 MB       | **55% less**         |
-| Type C | 1,198.9 MB | 493.5 MB       | **59% less**         |
-
-The Arrow columnar representation in off-heap memory is **55–59% smaller** than the formatted XML file size. Java heap usage comes from the StAX parser's working set (StringBuilder, character buffers) and validation HashMaps — not from Arrow itself.
-
-All test files fit comfortably within a **1 GB heap limit**, with the worst case (Type C) using 772 MB combined — **25% headroom** under the 1 GB cap.
-
-### 3. Parse Throughput (CPU)
-
-| File            | Rows      | Parse Time | Throughput (MB/s) | Throughput (rows/s) |
-| --------------- | --------- | ---------- | ----------------- | ------------------- |
-| Type A (1×1M)   | 1,000,000 | 9.90 s     | **62.9 MB/s**     | 101,041             |
-| Type B (2×500K) | 1,000,000 | 9.06 s     | **68.7 MB/s**     | 110,351             |
-| Type C (1M×1)   | 1,000,000 | 18.87 s    | **63.5 MB/s**     | 52,997              |
-
-Parse throughput is **consistent at ~63–69 MB/s** regardless of file structure (note: Type C’s lower rows/sec is because it has 2× the row count — 1M remittances + 1M transactions — while Type A/B only count transaction rows).
-
-The parser uses **boolean depth flags** instead of element stack scanning, giving O(1) context resolution on every XML event. Earlier versions using `ArrayList.contains()` were 1.4× slower on Type C.
-
-### 4. Post-Parse Analytics: The Arrow Payoff
-
-This is where Arrow delivers its primary value. Once data is in columnar form, analytical scans are dramatically faster than re-parsing XML:
-
-| File   | Parse Time | Validation Scan | Scan as % of Parse | Scan Throughput |
-| ------ | ---------- | --------------- | ------------------ | --------------- |
-| Type A | 9,897 ms   | 154 ms          | **1.6%**           | 6.5 M rows/sec  |
-| Type B | 9,062 ms   | 154 ms          | **1.7%**           | 6.5 M rows/sec  |
-| Type C | 18,869 ms  | 672 ms          | **3.6%**           | 1.5 M rows/sec  |
-
-**Each additional analytical pass over 1M rows costs only 154–672 ms**, compared to 9–19 seconds to re-parse the XML. This represents a **28–64× speedup** for repeated scans.
-
-Type C’s lower scan throughput (1.5 M vs 6.5 M rows/sec) is due to the HashMap lookup overhead of joining 1M distinct `pmt_inf_id` keys — a characteristic of the data shape, not an Arrow limitation.
-
-### 5. Arrow IPC Write Speed
-
-| File   | Arrow Size | Write Time | Write Speed  |
-| ------ | ---------- | ---------- | ------------ |
-| Type A | 170.0 MB   | 261 ms     | **651 MB/s** |
-| Type B | 170.0 MB   | 270 ms     | **630 MB/s** |
-| Type C | 308.6 MB   | 441 ms     | **700 MB/s** |
-
-Arrow IPC writes at **~650–700 MB/s** — essentially memcpy speed — because Arrow's in-memory format **is** the on-disk format. No serialization step is needed.
-
-### 6. End-to-End Pipeline Timing
-
-| File   | Parse     | Validate | Write  | **Total**     |
-| ------ | --------- | -------- | ------ | ------------- |
-| Type A | 9,897 ms  | 154 ms   | 261 ms | **10,312 ms** |
-| Type B | 9,062 ms  | 154 ms   | 270 ms | **9,486 ms**  |
-| Type C | 18,869 ms | 672 ms   | 441 ms | **19,982 ms** |
-
-Parsing dominates the pipeline (93–96% of total time). Validation and IPC export together account for only 4–7% of wall time.
-
-### Summary
-
-| Metric                    | Result                                             |
-| ------------------------- | -------------------------------------------------- |
-| **Disk storage**          | 72–74% smaller than formatted XML                  |
-| **Off-heap memory**       | 55–59% less than formatted XML file size           |
-| **Post-parse scan speed** | 1.5–6.5 M rows/sec (28–64× faster than re-parsing) |
-| **IPC write speed**       | ~650–700 MB/s (zero-copy format)                   |
-| **1 GB heap feasibility** | ✓ All files pass — worst case uses 772 MB combined |
-
-### Conclusion
-
-The **real ROI of Arrow is amortised over multiple analytical passes**. The initial XML → Arrow parse is a one-time cost (~63 MB/s on formatted XML). After that, every additional scan, aggregation, or validation runs at columnar speeds (millions of rows/sec) with zero deserialization overhead — and the data can be persisted to IPC files at 650+ MB/s for later reuse without any re-parsing at all.
-
-For a single read-once-discard workload, Arrow adds complexity without benefit. For workloads that **parse once then query repeatedly** — audit, reconciliation, regulatory checks, analytics — Arrow turns a 10–19 second re-parse into a 154–672 ms scan. That’s the payoff.
-
----
+- Arrow IPC → DuckDB load times for **all 5 file types (A–E)** — measured on a live run
+- Per-table Arrow file sizes (message, remittance, transaction) for every type
+- XML generation and parse timings per type
+- Memory leak verification: 50-iteration stress test, 0 bytes leaked
+- Full test suite summary (9 tests, all passing)
 
 ## Arrow File Sharing via S3
 

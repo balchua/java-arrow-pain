@@ -147,5 +147,275 @@ The application is safe to run as a **long-lived process** with repeated invocat
 |---|---|---|---|---|
 | `MemoryLeakVerificationTest` | 2 | ✅ 2 | 0 | 4.1 s |
 | `SampleGenerationTest` | 6 | ✅ 6 | 0 | 0.1 s |
-| `ArrowFileLoadBenchmarkTest` | 1 | ✅ 1 | 0 | 79.6 s |
-| **Total** | **9** | **✅ 9** | **0** | **~84 s** |
+| `ArrowFileLoadBenchmarkTest` | 1 | ✅ 1 | 0 | ~80 s |
+| `FullPipelineBenchmarkTest` | 1 | ✅ 1 | 0 | ~52 s |
+| **Total** | **10** | **✅ 10** | **0** | **~136 s** |
+
+---
+
+## Full Pipeline Benchmark — `FullPipelineBenchmarkTest` (All Types A–E)
+
+Runs the complete production pipeline for every file type:
+**XML → Arrow parse → DuckDB registration (C Data Interface load) → SQL Validation → Arrow IPC Write**
+
+Captures the same metrics as running `App` from the command line:
+Java heap (before/after/delta), Arrow off-heap (allocated, peak), phase timings, throughput.
+
+### Consolidated Summary
+
+```
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║  Full Pipeline Benchmark Summary — XML→Arrow Parse → DuckDB Load → SQL Validate → Arrow IPC Write            ║
+╠═════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦════════════╣
+║  Type   ║ XML (MB) ║ Arr (MB) ║ Parse ms ║ Duck ms  ║  Val ms  ║ Write ms ║ OffH (MB)║ Heap ΔMB ║  Tx Rows   ║
+╠═════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬════════════╣
+║  Type A  ║    516.0 ║    224.4 ║    7,208 ║      938 ║       82 ║      183 ║    347.9 ║      8.5 ║  1,000,000 ║
+║  Type B  ║    515.9 ║    224.3 ║    6,201 ║      423 ║       78 ║      169 ║    347.9 ║     26.0 ║  1,000,000 ║
+║  Type C  ║    888.0 ║    362.1 ║   10,877 ║      763 ║      338 ║      261 ║    562.2 ║     42.3 ║  1,000,000 ║
+║  Type D  ║      0.1 ║      0.1 ║        3 ║       50 ║        8 ║        3 ║      1.2 ║      5.2 ║        200 ║
+║  Type E  ║      0.1 ║      0.1 ║        4 ║       16 ║       11 ║        2 ║      1.2 ║      4.6 ║        200 ║
+╚═════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩════════════╝
+```
+
+> **OffH (MB)** = Arrow off-heap peak (post-parse, before DuckDB load)  
+> **Heap ΔMB** = Java heap delta (after − before, post-GC boundary)  
+> Type E validation reports 3 errors (expected — invalid CtrlSum)
+
+### Type A — 1 PmtInf × 1,000,000 TxInf
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: Type A (1 PmtInf × 1,000,000 TxInf)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :     541,056,359 bytes (516.0 MB)       ║
+║  Arrow File Size  :     235,324,150 bytes (224.4 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :               1                       ║
+║  Transaction rows :       1,000,000                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :      7,208 ms  (7.21 s)              ║
+║  DuckDB Registration:        938 ms  (0.94 s)              ║
+║  SQL Validation    :         82 ms  (0.08 s)              ║
+║  Arrow IPC Write   :        183 ms  (0.18 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 138,735 rows/sec                    ║
+║  Parse Throughput : 71.59 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  DUCKDB REGISTRATION                                       ║
+║  Appender load time:        938 ms                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  VALIDATION                                                ║
+║  Result           : ✓ PASSED                                 ║
+║  Remittances      :               1 checked                  ║
+║  Transactions     :       1,000,000 scanned                  ║
+║  Validation time  :        82.221 ms                        ║
+║  Scan throughput  : 12,162 rows/ms  (12 M rows/sec)     ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :       5,870,544 bytes (5.6 MB)       ║
+║  Heap after       :      14,780,296 bytes (14.1 MB)       ║
+║  Heap delta       :       8,909,752 bytes (8.5 MB)       ║
+║  Heap max (-Xmx)  :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :     364,527,616 bytes (347.6 MB)       ║
+║  Off-heap peak    :     364,789,760 bytes (347.9 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :     379,570,056 bytes (362.0 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### Type B — 2 PmtInf × 500,000 TxInf
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: Type B (2 PmtInf × 500,000 TxInf)                ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :     540,945,672 bytes (515.9 MB)       ║
+║  Arrow File Size  :     235,213,246 bytes (224.3 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :               2                       ║
+║  Transaction rows :       1,000,000                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :      6,201 ms  (6.20 s)              ║
+║  DuckDB Registration:        423 ms  (0.42 s)              ║
+║  SQL Validation    :         78 ms  (0.08 s)              ║
+║  Arrow IPC Write   :        169 ms  (0.17 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 161,264 rows/sec                    ║
+║  Parse Throughput : 83.19 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  DUCKDB REGISTRATION                                       ║
+║  Appender load time:        423 ms                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  VALIDATION                                                ║
+║  Result           : ✓ PASSED                                 ║
+║  Remittances      :               2 checked                  ║
+║  Transactions     :       1,000,000 scanned                  ║
+║  Validation time  :        78.611 ms                        ║
+║  Scan throughput  : 12,721 rows/ms  (13 M rows/sec)     ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      11,084,552 bytes (10.6 MB)       ║
+║  Heap after       :      38,370,472 bytes (36.6 MB)       ║
+║  Heap delta       :      27,285,920 bytes (26.0 MB)       ║
+║  Heap max (-Xmx)  :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :     364,527,616 bytes (347.6 MB)       ║
+║  Off-heap peak    :     364,789,760 bytes (347.9 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :     403,160,232 bytes (384.5 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### Type C — 1,000,000 PmtInf × 1 TxInf
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: Type C (1,000,000 PmtInf × 1 TxInf)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :     931,139,307 bytes (888.0 MB)       ║
+║  Arrow File Size  :     379,668,982 bytes (362.1 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :       1,000,000                       ║
+║  Transaction rows :       1,000,000                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :     10,877 ms  (10.88 s)              ║
+║  DuckDB Registration:        763 ms  (0.76 s)              ║
+║  SQL Validation    :        338 ms  (0.34 s)              ║
+║  Arrow IPC Write   :        261 ms  (0.26 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 91,937 rows/sec                    ║
+║  Parse Throughput : 81.64 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  DUCKDB REGISTRATION                                       ║
+║  Appender load time:        763 ms                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  VALIDATION                                                ║
+║  Result           : ✓ PASSED                                 ║
+║  Remittances      :       1,000,000 checked                  ║
+║  Transactions     :       1,000,000 scanned                  ║
+║  Validation time  :       338.421 ms                        ║
+║  Scan throughput  : 2,955 rows/ms  (3 M rows/sec)     ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      11,085,088 bytes (10.6 MB)       ║
+║  Heap after       :      55,457,872 bytes (52.9 MB)       ║
+║  Heap delta       :      44,372,784 bytes (42.3 MB)       ║
+║  Heap max (-Xmx)  :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :     589,266,944 bytes (562.0 MB)       ║
+║  Off-heap peak    :     589,463,552 bytes (562.2 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :     644,921,424 bytes (615.0 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### Type D — 2 PmtInf × 100 TxInf (valid)
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: Type D (2 PmtInf × 100 TxInf — valid)            ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :         108,584 bytes (0.1 MB)       ║
+║  Arrow File Size  :          52,630 bytes (0.1 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :               2                       ║
+║  Transaction rows :             200                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :          3 ms  (0.00 s)              ║
+║  DuckDB Registration:         50 ms  (0.05 s)              ║
+║  SQL Validation    :          8 ms  (0.01 s)              ║
+║  Arrow IPC Write   :          3 ms  (0.00 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 66,667 rows/sec                    ║
+║  Parse Throughput : 34.52 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  DUCKDB REGISTRATION                                       ║
+║  Appender load time:         50 ms                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  VALIDATION                                                ║
+║  Result           : ✓ PASSED                                 ║
+║  Remittances      :               2 checked                  ║
+║  Transactions     :             200 scanned                  ║
+║  Validation time  :         8.019 ms                        ║
+║  Scan throughput  : 25 rows/ms  (0 M rows/sec)     ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      11,108,296 bytes (10.6 MB)       ║
+║  Heap after       :      16,543,744 bytes (15.8 MB)       ║
+║  Heap delta       :       5,435,448 bytes (5.2 MB)       ║
+║  Heap max (-Xmx)  :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :       1,245,184 bytes (1.2 MB)       ║
+║  Off-heap peak    :       1,248,708 bytes (1.2 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :      17,792,452 bytes (17.0 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### Type E — 2 PmtInf × 100 TxInf (invalid CtrlSum)
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  BENCHMARK: Type E (2 PmtInf × 100 TxInf — invalid CtrlSum)  ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML File Size    :         108,576 bytes (0.1 MB)       ║
+║  Arrow File Size  :          52,630 bytes (0.1 MB)       ║
+║  Message rows     :               1                       ║
+║  Remittance rows  :               2                       ║
+║  Transaction rows :             200                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  XML→Arrow Parse   :          4 ms  (0.00 s)              ║
+║  DuckDB Registration:         16 ms  (0.02 s)              ║
+║  SQL Validation    :         11 ms  (0.01 s)              ║
+║  Arrow IPC Write   :          2 ms  (0.00 s)              ║
+╠══════════════════════════════════════════════════════════════╣
+║  Parse Throughput : 50,000 rows/sec                    ║
+║  Parse Throughput : 25.89 MB/sec                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  DUCKDB REGISTRATION                                       ║
+║  Appender load time:         16 ms                          ║
+╠══════════════════════════════════════════════════════════════╣
+║  VALIDATION                                                ║
+║  Result           : ✗ FAILED (3 errors)                      ║
+║  Remittances      :               2 checked                  ║
+║  Transactions     :             200 scanned                  ║
+║  Validation time  :        11.955 ms                        ║
+║  Scan throughput  : 17 rows/ms  (0 M rows/sec)     ║
+╠══════════════════════════════════════════════════════════════╣
+║  MEMORY USAGE                                              ║
+║  Heap before      :      11,113,632 bytes (10.6 MB)       ║
+║  Heap after       :      15,885,512 bytes (15.1 MB)       ║
+║  Heap delta       :       4,771,880 bytes (4.6 MB)       ║
+║  Heap max (-Xmx)  :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Off-heap alloc'd :       1,245,184 bytes (1.2 MB)       ║
+║  Off-heap peak    :       1,248,708 bytes (1.2 MB)       ║
+║  Off-heap limit   :   2,147,483,648 bytes (2,048.0 MB)       ║
+║  ──────────────────────────────────────────────────────────║
+║  Combined peak    :      17,134,220 bytes (16.3 MB)       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### Key Observations
+
+| Metric | Type A | Type B | Type C |
+|---|---|---|---|
+| Arrow off-heap peak | 348 MB | 348 MB | 562 MB |
+| Java heap delta | 8.5 MB | 26.0 MB | 42.3 MB |
+| Combined peak (heap + off-heap) | 362 MB | 385 MB | 615 MB |
+| XML → Arrow compression | −57% | −57% | −59% |
+| DuckDB registration | 938 ms | 423 ms | 763 ms |
+| SQL validation scan | 12 M rows/sec | 13 M rows/sec | 3 M rows/sec |
+
+> **Type C validation** is slower (338 ms vs 78–82 ms) because it has 1M remittance rows
+> to scan in addition to 1M transaction rows. Type A and B have 1–2 remittance rows.
+
+> **Java heap delta is tiny** (8–42 MB) even for 1M-row files. The parser writes
+> directly into Arrow off-heap vectors via the StAX streaming pull approach — no
+> intermediate POJOs, no DOM, no ArrayList buffers. The heap is used only by the
+> StAX parser's working set and DuckDB's SQL planner.

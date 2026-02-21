@@ -197,11 +197,12 @@ See [TEST_RESULTS.md](TEST_RESULTS.md) for detailed performance comparison and t
 
 See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
 
-- Arrow IPC → DuckDB load times for **all 5 file types (A–E)** — measured on a live run
+- **Full pipeline benchmarks** (all 5 types A–E): XML→Arrow parse, DuckDB registration, SQL validation, Arrow IPC write
+- Java heap delta and Arrow off-heap peak for every type
 - Per-table Arrow file sizes (message, remittance, transaction) for every type
-- XML generation and parse timings per type
+- Arrow IPC → DuckDB downstream load times (consumer simulation)
 - Memory leak verification: 50-iteration stress test, 0 bytes leaked
-- Full test suite summary (9 tests, all passing)
+- Full test suite summary (10 tests, all passing)
 
 ## Arrow File Sharing via S3
 

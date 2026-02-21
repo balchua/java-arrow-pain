@@ -1,0 +1,216 @@
+package com.iso20022.pain;
+
+import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.arrow.ArrowFileExporter;
+import com.iso20022.pain.benchmark.LoadBenchmark;
+import com.iso20022.pain.dal.PaymentRepository;
+import com.iso20022.pain.dal.PaymentRepositoryImpl;
+import com.iso20022.pain.generator.PainFileSpec;
+import com.iso20022.pain.generator.TestFileGenerator;
+import com.iso20022.pain.generator.TestPainFileSpecs;
+import com.iso20022.pain.parser.PainParser;
+import com.iso20022.pain.parser.PainParserImpl;
+import com.iso20022.pain.validation.ValidationContext;
+import com.iso20022.pain.validation.ValidationPipeline;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Full pipeline benchmark for all file types A–E.
+ *
+ * <p>Exercises the complete XML → Arrow (parse) → DuckDB (load) →
+ * SQL Validation → Arrow IPC Write pipeline for every type,
+ * capturing the same metrics that {@link LoadBenchmark} records
+ * when {@code App} is run from the command line:</p>
+ * <ul>
+ *   <li>XML file size</li>
+ *   <li>XML → Arrow parse time and throughput</li>
+ *   <li>Arrow off-heap allocated and peak memory</li>
+ *   <li>Java heap delta (before / after GC boundary)</li>
+ *   <li>DuckDB registration (Arrow C Data Interface load) time</li>
+ *   <li>SQL Validation time</li>
+ *   <li>Arrow IPC write time and output file sizes</li>
+ * </ul>
+ *
+ * <p>Each type's full {@link LoadBenchmark#toReport()} is printed to stdout,
+ * followed by a consolidated summary table.</p>
+ */
+class FullPipelineBenchmarkTest {
+
+    private static final long ALLOCATOR_LIMIT = 2L * 1024 * 1024 * 1024; // 2 GB
+
+    private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
+
+    // Summarises one type for the consolidated table
+    record TypeSummary(
+            String typeLabel,
+            long xmlSizeBytes,
+            long arrowSizeBytes,
+            long parseMs,
+            long duckdbMs,
+            long validateMs,
+            long writeMs,
+            long offHeapAllocatedBytes,
+            long offHeapPeakBytes,
+            long heapDeltaBytes,
+            long txRows,
+            boolean valid
+    ) {}
+
+    @Test
+    @DisplayName("Full pipeline benchmark — all types A through E")
+    void fullPipelineBenchmarkAllTypes() throws Exception {
+        Files.createDirectories(OUTPUT_DIR);
+
+        List<TypeSummary> summaries = new ArrayList<>();
+
+        summaries.add(runPipeline(TestPainFileSpecs.TYPE_A));
+        summaries.add(runPipeline(TestPainFileSpecs.TYPE_B));
+        summaries.add(runPipeline(TestPainFileSpecs.TYPE_C));
+        summaries.add(runPipeline(TestPainFileSpecs.TYPE_D));
+        summaries.add(runPipeline(TestPainFileSpecs.TYPE_E));
+
+        printSummaryTable(summaries);
+
+        // Basic correctness assertions for each type
+        assertEquals(1_000_000L, summaries.get(0).txRows(), "Type A: expected 1M tx rows");
+        assertEquals(1_000_000L, summaries.get(1).txRows(), "Type B: expected 1M tx rows");
+        assertEquals(1_000_000L, summaries.get(2).txRows(), "Type C: expected 1M tx rows");
+        assertEquals(200L,       summaries.get(3).txRows(), "Type D: expected 200 tx rows");
+        assertEquals(200L,       summaries.get(4).txRows(), "Type E: expected 200 tx rows");
+
+        assertTrue(summaries.get(3).valid(), "Type D should pass validation");
+        assertFalse(summaries.get(4).valid(), "Type E should fail validation (invalid CtrlSum)");
+    }
+
+    private TypeSummary runPipeline(PainFileSpec spec) throws Exception {
+        Path xmlFile = TestFileGenerator.generateIfAbsent(spec);
+
+        String label = spec.name();
+        LoadBenchmark benchmark = new LoadBenchmark(label);
+
+        long fileSizeBytes = Files.size(xmlFile);
+        benchmark.setXmlFileSizeBytes(fileSizeBytes);
+
+        System.gc();
+        long heapBefore = LoadBenchmark.captureHeapUsed();
+        benchmark.setHeapUsedBeforeBytes(heapBefore);
+        benchmark.setHeapMaxBytes(Runtime.getRuntime().maxMemory());
+
+        long parseMs;
+        long duckdbMs;
+        long validateMs;
+        long writeMs;
+        long offHeapAllocated;
+        long offHeapPeak;
+        long txRows;
+        long arrowBytes = 0;
+        boolean validationPassed;
+
+        try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
+            benchmark.setOffHeapLimitBytes(allocator.getLimit());
+
+            PainParser parser = new PainParserImpl();
+
+            Instant parseStart = Instant.now();
+            ArrowBatchResult result = parser.parse(xmlFile, allocator);
+            Duration parseDuration = Duration.between(parseStart, Instant.now());
+            parseMs = parseDuration.toMillis();
+            benchmark.recordPhase("XML\u2192Arrow Parse", parseDuration);
+
+            try (result) {
+                benchmark.setTotalRows(result.getTransactionRowCount());
+                benchmark.setMessageRows(result.getMessageRowCount());
+                benchmark.setRemittanceRows(result.getRemittanceRowCount());
+
+                offHeapAllocated = allocator.getAllocatedMemory();
+                benchmark.setOffHeapAllocatedBytes(offHeapAllocated);
+                benchmark.setOffHeapPeakBytes(allocator.getPeakMemoryAllocation());
+
+                Instant duckdbStart = Instant.now();
+                try (PaymentRepository repository = new PaymentRepositoryImpl(result, allocator)) {
+                    Duration duckdbDuration = Duration.between(duckdbStart, Instant.now());
+                    duckdbMs = duckdbDuration.toMillis();
+                    benchmark.recordPhase("DuckDB Registration", duckdbDuration);
+
+                    Instant valStart = Instant.now();
+                    ValidationContext valContext = ValidationPipeline.standard().execute(repository);
+                    Duration valDuration = Duration.between(valStart, Instant.now());
+                    validateMs = valDuration.toMillis();
+                    benchmark.recordPhase("SQL Validation", valDuration);
+
+                    validationPassed = !valContext.hasErrors();
+                    benchmark.setValidationResult(
+                            validationPassed,
+                            result.getRemittanceRowCount(),
+                            result.getTransactionRowCount(),
+                            valContext.hasErrors() ? valContext.getErrors().size() : 0);
+                }
+
+                String fileName = xmlFile.getFileName().toString();
+                Instant writeStart = Instant.now();
+                arrowBytes = ArrowFileExporter.export(result, allocator, OUTPUT_DIR, fileName);
+                Duration writeDuration = Duration.between(writeStart, Instant.now());
+                writeMs = writeDuration.toMillis();
+                benchmark.recordPhase("Arrow IPC Write", writeDuration);
+                benchmark.setArrowFileSizeBytes(arrowBytes);
+
+                offHeapPeak = allocator.getPeakMemoryAllocation();
+                benchmark.setOffHeapPeakBytes(offHeapPeak);
+                txRows = result.getTransactionRowCount();
+            }
+        }
+
+        benchmark.setHeapUsedAfterBytes(LoadBenchmark.captureHeapUsed());
+
+        // Print the full LoadBenchmark report for this type
+        System.out.println(benchmark.toReport());
+
+        long heapDelta = LoadBenchmark.captureHeapUsed() - heapBefore;
+
+        return new TypeSummary(
+                spec.name().replaceAll("\\s*\\(.*", "").trim(),
+                fileSizeBytes,
+                arrowBytes,
+                parseMs, duckdbMs, validateMs, writeMs,
+                offHeapAllocated, offHeapPeak,
+                heapDelta, txRows, validationPassed
+        );
+    }
+
+    private static void printSummaryTable(List<TypeSummary> rows) {
+        System.out.println();
+        System.out.println("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║  Full Pipeline Benchmark Summary — XML→Arrow Parse → DuckDB Load → SQL Validate → Arrow IPC Write            ║");
+        System.out.println("╠═════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦════════════╣");
+        System.out.println("║  Type   ║ XML (MB) ║ Arr (MB) ║ Parse ms ║ Duck ms  ║  Val ms  ║ Write ms ║ OffH (MB)║ Heap ΔMB ║  Tx Rows   ║");
+        System.out.println("╠═════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬════════════╣");
+        for (TypeSummary r : rows) {
+            System.out.printf("║  %-7s ║ %8.1f ║ %8.1f ║ %8s ║ %8s ║ %8s ║ %8s ║ %8.1f ║ %8.1f ║ %10s ║%n",
+                    r.typeLabel(),
+                    r.xmlSizeBytes() / (1024.0 * 1024.0),
+                    r.arrowSizeBytes() / (1024.0 * 1024.0),
+                    String.format("%,d", r.parseMs()),
+                    String.format("%,d", r.duckdbMs()),
+                    String.format("%,d", r.validateMs()),
+                    String.format("%,d", r.writeMs()),
+                    r.offHeapPeakBytes() / (1024.0 * 1024.0),
+                    r.heapDeltaBytes() / (1024.0 * 1024.0),
+                    String.format("%,d", r.txRows()));
+        }
+        System.out.println("╚═════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩════════════╝");
+        System.out.println();
+    }
+}

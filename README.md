@@ -1,5 +1,7 @@
 # ISO 20022 pain.001 → Apache Arrow + DuckDB Loader
 
+📊 See [Test Results & Benchmark Report](TEST_RESULTS.md) for detailed performance data and test outcomes.
+
 A study project that parses ISO 20022 **pain.001.001.09** (CustomerCreditTransferInitiation) XML files into **Apache Arrow** columnar in-memory tables using a streaming StAX parser — with no DOM, no JAXB, and no intermediate POJOs.
 
 The goal is to measure whether Apache Arrow's columnar format provides meaningful gains in **storage**, **memory**, and **analytical throughput** over raw XML for financial messaging workloads.
@@ -56,21 +58,21 @@ Arrow type mappings follow ISO 20022 data type definitions:
 
 ```
 src/main/java/com/iso20022/pain/
-├── App.java                          # Entry point — orchestrates generate → parse → validate → export
+├── App.java                          # Entry point — requires an existing pain.001 XML file path
 ├── arrow/
 │   ├── Pain001ArrowSchema.java       # Arrow schema definitions for all 3 tables
 │   ├── ArrowBatchResult.java         # Holds VectorSchemaRoot tables (AutoCloseable)
 │   └── ArrowFileExporter.java        # Writes Arrow IPC files (VectorUnloader/Loader pattern)
 ├── parser/
-│   └── Pain001StaxParser.java        # Streaming StAX parser → Arrow vectors (no POJOs)
+│   ├── PainParser.java               # Interface: parse(Path, BufferAllocator) → ArrowBatchResult
+│   └── PainParserImpl.java           # Streaming StAX implementation (no POJOs)
 ├── generator/
-│   ├── Pain001XmlGenerator.java      # Generates valid pain.001.001.09 XML via StAX
-│   ├── IndentingXMLStreamWriter.java  # Pretty-printing decorator for XMLStreamWriter
-│   └── SampleFileSpec.java           # Test file specifications (Type A/B/C)
+│   └── PainFileSpec.java             # Data record: file spec (name, counts, invalidControlSum flag)
 ├── dal/
-│   └── Pain001Repository.java        # DuckDB DAL — loads Arrow into DuckDB, exposes SQL API
+│   ├── PaymentRepository.java        # Interface: SQL access to message/remittance/transaction tables
+│   └── PaymentRepositoryImpl.java    # DuckDB implementation (zero-copy Arrow C Data Interface)
 ├── validation/
-│   ├── Validator.java                # Base interface for all validators (uses Pain001Repository)
+│   ├── Validator.java                # Interface: validate(PaymentRepository, ValidationContext)
 │   ├── ValidationContext.java        # Thread-safe error/warning collection
 │   ├── ValidationPipeline.java       # Fluent builder with virtual thread support
 │   ├── ExecutionMode.java            # SEQUENTIAL, PARALLEL, AUTO modes
@@ -84,64 +86,53 @@ src/main/java/com/iso20022/pain/
 │       └── ParallelTransactionValidator.java  # Batch-parallel transaction validator
 └── benchmark/
     └── LoadBenchmark.java            # Timing, memory tracking, formatted report
+
+src/test/java/com/iso20022/pain/
+├── SampleGenerationTest.java         # JUnit 5: Type D (valid) + Type E (invalid CtrlSum)
+├── ArrowFileLoadBenchmarkTest.java   # JUnit 5: Arrow IPC → DuckDB load speed benchmark
+├── SampleGeneratorRunner.java        # Runnable main: generate by type (a–e)
+└── generator/
+    ├── PainXmlGenerator.java         # Interface: generate(PainFileSpec, Path) → Path
+    ├── PainXmlGeneratorImpl.java     # StAX implementation (honours invalidControlSum)
+    ├── TestPainFileSpecs.java        # Test-only spec constants A–E
+    └── TestFileGenerator.java        # generate-if-absent + file-complete check
 ```
 
 ## Test Files
 
-Four XML files exercise different structural shapes of the pain.001 schema, all producing **1 million transactions**:
+| Type | File | Structure | Remittances | Txns/Block | Total Txns | Purpose |
+|---|---|---|---|---|---|---|
+| A | `pain001_type_a_1x1M.xml` | Fat batch | 1 | 1,000,000 | 1,000,000 | Benchmark |
+| B | `pain001_type_b_2x500K.xml` | Two batches | 2 | 500,000 | 1,000,000 | Benchmark |
+| C | `pain001_type_c_1Mx1.xml` | Many small | 1,000,000 | 1 | 1,000,000 | Benchmark |
+| D | `pain001_type_d_2x100_valid.xml` | Small valid | 2 | 100 | 200 | Unit test |
+| E | `pain001_type_e_2x100_invalid_ctrlsum.xml` | Small invalid | 2 | 100 | 200 | Negative test |
 
-| File                        | Structure   | Remittances | Txns/Remittance | Total Txns | XML Size (compact) | XML Size (formatted) |
-| --------------------------- | ----------- | ----------- | --------------- | ---------- | ------------------ | -------------------- |
-| `pain001_test_10.xml`       | Trivial     | 1           | 10              | 10         | 10 KB              | 10 KB                |
-| `pain001_type_a_1x1M.xml`   | Fat batch   | 1           | 1,000,000       | 1,000,000  | 387 MB             | 623 MB               |
-| `pain001_type_b_2x500K.xml` | Two batches | 2           | 500,000         | 1,000,000  | 387 MB             | 623 MB               |
-| `pain001_type_c_1Mx1.xml`   | Many small  | 1,000,000   | 1               | 1,000,000  | 760 MB             | 1,199 MB             |
-
-Type C is intentionally adversarial — it maximises remittance-level overhead (debtor info, account, agent repeated per transaction) and produces the largest XML per transaction.
+> Types A–C are large files (387–1,199 MB) not committed to the repo. Types D–E are fast-generation test files generated automatically by `mvn test`.
 
 ## Running
 
 ```bash
-# Prerequisites: Java 21+, Maven 3.9+
+# Prerequisites: Java 21+, Maven 3.9+, --add-opens for Arrow unsafe allocator
 
-# Generate all 3 sample XML files + parse + validate + export
-mvn exec:java
+# Parse a pain.001 XML file (must exist — generate it first with mvn test or SampleGeneratorRunner)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.args="path/to/pain001.xml"
 
-# Parse a single file
-mvn exec:java -Dexec.args="src/main/resources/sample-data/pain001_type_a_1x1M.xml"
+# Generate test sample files (type-d and type-e are fast, A–C are large)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.mainClass="com.iso20022.pain.SampleGeneratorRunner" \
+                -Dexec.args="type-d type-e"
 
-# Generate compact (minified) sample files only
-mvn exec:java -Dexec.args="generate"
+# Run all tests (generates Type D and E files as needed, runs benchmark)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" mvn test
 
-# Generate pretty-printed (formatted) sample files
-mvn exec:java -Dexec.args="generate-formatted"
-
-# Run with constrained heap (1 GB)
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx1g" \
-  mvn exec:java -Dexec.args="src/main/resources/sample-data/pain001_type_a_1x1M.xml"
-
-# Run validation test suite (recommended for comparison)
-./run_validation_tests.sh
+# Run the Arrow load benchmark only
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -Dtest=ArrowFileLoadBenchmarkTest
 ```
 
-Output Arrow IPC files are written to `src/main/resources/output/`.
-
-### Sample Data Files
-
-The large XML test files (up to 1.2 GB formatted) are **not included in the repository**. Generate them locally:
-
-```bash
-# Generate compact (minified) XML — one-line format, smallest on disk
-mvn exec:java -Dexec.args="generate"
-
-# Generate pretty-printed XML — indented, ~60% larger but human-readable
-mvn exec:java -Dexec.args="generate-formatted"
-
-# Compact sizes: Type A/B = 387 MB, Type C = 760 MB
-# Formatted sizes: Type A/B = 623 MB, Type C = 1,199 MB
-```
-
-Formatted XML is recommended for testing since real-world client files are often pretty-printed. The parser handles both formats with identical correctness and comparable throughput.
+Output Arrow IPC files are written to `src/main/resources/output/` (main pipeline) or `src/test/resources/output/` (tests).
 
 ## Validation Framework
 
@@ -180,12 +171,12 @@ ValidationPipeline
 
 ```java
 // Standard pipeline with all validators (repository provides SQL access)
-try (Pain001Repository repo = new Pain001Repository(arrowBatchResult)) {
+try (PaymentRepository repo = new PaymentRepositoryImpl(arrowBatchResult, allocator)) {
     ValidationContext ctx = ValidationPipeline.standard().execute(repo);
 }
 
 // Custom pipeline
-try (Pain001Repository repo = new Pain001Repository(arrowBatchResult)) {
+try (PaymentRepository repo = new PaymentRepositoryImpl(arrowBatchResult, allocator)) {
     ValidationContext ctx = ValidationPipeline.create()
         .add(new MessageValidator())
         .add(new RemittanceValidator())
@@ -202,103 +193,80 @@ See [TEST_RESULTS.md](TEST_RESULTS.md) for detailed performance comparison and t
 
 ---
 
-## Study Results
+## Performance Results
 
-All benchmarks run with **-Xmx1g** heap on a single thread, using **pretty-printed (formatted) XML** files to simulate real-world client input. Arrow off-heap allocator capped at 2 GB. Batch size: 65,536 rows per `VectorSchemaRoot`.
+See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
 
-### 1. Storage: XML vs Arrow IPC on Disk
+- **Full pipeline benchmarks** (all 5 types A–E): XML→Arrow parse, DuckDB registration, SQL validation, Arrow IPC write
+- Java heap delta and Arrow off-heap peak for every type
+- Per-table Arrow file sizes (message, remittance, transaction) for every type
+- Arrow IPC → DuckDB downstream load times (consumer simulation)
+- Memory leak verification: 50-iteration stress test, 0 bytes leaked
+- Full test suite summary (10 tests, all passing)
 
-| File            | XML Size (formatted) | Arrow IPC Size | Reduction         |
-| --------------- | -------------------- | -------------- | ----------------- |
-| Type A (1×1M)   | 622.9 MB             | 170.0 MB       | **72.7% smaller** |
-| Type B (2×500K) | 622.9 MB             | 170.0 MB       | **72.7% smaller** |
-| Type C (1M×1)   | 1,198.9 MB           | 308.6 MB       | **74.3% smaller** |
+## Arrow File Sharing via S3
 
-Arrow IPC files are consistently **72–74% smaller** than the formatted source XML. XML carries enormous per-element tag overhead (`<CdtTrfTxInf>`, `<PmtId>`, `<InstrId>`, etc.) plus indentation whitespace that Arrow eliminates by storing columnar binary data with compact metadata.
+One of Arrow's most compelling production use cases is **sharing pre-parsed data across applications via object storage (e.g. AWS S3, GCS, Azure Blob)** — instead of passing raw XML or JSON and forcing each consumer to re-parse.
 
-Type C’s higher reduction (74.3%) comes from the XML having to repeat debtor/account/agent elements for every one of its 1M remittance blocks — overhead that Arrow’s columnar layout absorbs efficiently.
+### The Traditional Approach (XML/JSON over S3)
 
-### 2. Memory Efficiency
+```
+Producer App                        Consumer App A
+  generate pain.001 XML  ──S3──▶   download XML (387–1,199 MB)
+                                    parse XML:    9–19 seconds
+                                    process data
 
-| File   | XML Size   | Arrow Off-Heap | Java Heap | Combined Peak | Combined vs XML |
-| ------ | ---------- | -------------- | --------- | ------------- | --------------- |
-| Type A | 622.9 MB   | 279.3 MB       | 136.9 MB  | 416.2 MB      | −33.2%          |
-| Type B | 622.9 MB   | 279.3 MB       | 31.9 MB   | 311.2 MB      | −50.0%          |
-| Type C | 1,198.9 MB | 493.5 MB       | 278.8 MB  | 772.3 MB      | −35.6%          |
+                         ──S3──▶   Consumer App B: same cost again
+                         ──S3──▶   Consumer App C: same cost again
+```
 
-**Arrow off-heap memory alone:**
+**Each consumer pays the full parse cost independently**, even though the data is identical.
 
-| File   | XML Size   | Arrow Off-Heap | Off-Heap vs XML Size |
-| ------ | ---------- | -------------- | -------------------- |
-| Type A | 622.9 MB   | 279.3 MB       | **55% less**         |
-| Type B | 622.9 MB   | 279.3 MB       | **55% less**         |
-| Type C | 1,198.9 MB | 493.5 MB       | **59% less**         |
+### The Arrow IPC Approach
 
-The Arrow columnar representation in off-heap memory is **55–59% smaller** than the formatted XML file size. Java heap usage comes from the StAX parser's working set (StringBuilder, character buffers) and validation HashMaps — not from Arrow itself.
+```
+Producer App                        Consumer App A
+  parse XML once                    download .arrow files (170–309 MB, 55–74% smaller)
+  export Arrow IPC  ──S3──▶         load into DuckDB:  ~50–200 ms  ← benchmark result
+  3 × .arrow files                  run SQL analytics
 
-All test files fit comfortably within a **1 GB heap limit**, with the worst case (Type C) using 772 MB combined — **25% headroom** under the 1 GB cap.
+                    ──S3──▶         Consumer App B: same ~50–200 ms
+                    ──S3──▶         Consumer App C: same ~50–200 ms
+```
 
-### 3. Parse Throughput (CPU)
+### Measured Performance Comparison
 
-| File            | Rows      | Parse Time | Throughput (MB/s) | Throughput (rows/s) |
-| --------------- | --------- | ---------- | ----------------- | ------------------- |
-| Type A (1×1M)   | 1,000,000 | 9.90 s     | **62.9 MB/s**     | 101,041             |
-| Type B (2×500K) | 1,000,000 | 9.06 s     | **68.7 MB/s**     | 110,351             |
-| Type C (1M×1)   | 1,000,000 | 18.87 s    | **63.5 MB/s**     | 52,997              |
+| Metric                        | XML/JSON (re-parse)          | Arrow IPC (load from file)   | Speedup     |
+|-------------------------------|------------------------------|------------------------------|-------------|
+| Transfer size (Type A/B)      | 387 MB (compact)             | 170 MB                       | 2.3× smaller |
+| Transfer size (Type C)        | 760 MB (compact)             | 309 MB                       | 2.5× smaller |
+| Load/parse time (1M rows)     | 9–19 seconds                 | 50–200 ms                    | **50–200×** |
+| CPU per consumer              | Full StAX parse              | DuckDB bulk vectorised load  | Minimal     |
+| Schema enforcement            | Manual, error-prone          | Built into Arrow schema      | Automatic   |
+| Type fidelity (Decimal128)    | String-to-BigDecimal cast    | Native columnar Decimal128   | Zero-cost   |
 
-Parse throughput is **consistent at ~63–69 MB/s** regardless of file structure (note: Type C’s lower rows/sec is because it has 2× the row count — 1M remittances + 1M transactions — while Type A/B only count transaction rows).
+### Why Arrow IPC Is Better Than JSON/CSV for This Use Case
 
-The parser uses **boolean depth flags** instead of element stack scanning, giving O(1) context resolution on every XML event. Earlier versions using `ArrayList.contains()` were 1.4× slower on Type C.
+1. **Schema is self-describing** — no schema registry needed; the `.arrow` file carries its schema.
+2. **Zero deserialization** — Arrow's in-memory format IS the on-disk format; DuckDB reads buffers directly.
+3. **Language-agnostic** — Python (PyArrow/DuckDB), Go, Rust, C++, and Java consumers all read the same file.
+4. **Columnar compression** — repeated strings (IBANs, BICs, currency codes) compress well in columnar layout.
+5. **Predicate pushdown** — DuckDB can push filters into Arrow reads, scanning only relevant columns/batches.
 
-### 4. Post-Parse Analytics: The Arrow Payoff
+### S3 Cost Implications
 
-This is where Arrow delivers its primary value. Once data is in columnar form, analytical scans are dramatically faster than re-parsing XML:
+At $0.023/GB (S3 Standard), for 1,000 pain.001 files per day at Type A/B size:
 
-| File   | Parse Time | Validation Scan | Scan as % of Parse | Scan Throughput |
-| ------ | ---------- | --------------- | ------------------ | --------------- |
-| Type A | 9,897 ms   | 154 ms          | **1.6%**           | 6.5 M rows/sec  |
-| Type B | 9,062 ms   | 154 ms          | **1.7%**           | 6.5 M rows/sec  |
-| Type C | 18,869 ms  | 672 ms          | **3.6%**           | 1.5 M rows/sec  |
+| Format | Storage per day | Transfer to 3 consumers/day |
+|---|---|---|
+| XML (compact) | 387 GB → $8.90/day | 3 × 387 GB → $26.70/day |
+| Arrow IPC | 170 GB → $3.91/day | 3 × 170 GB → $11.73/day |
+| **Saving** | **$4.99/day** | **$14.97/day** |
 
-**Each additional analytical pass over 1M rows costs only 154–672 ms**, compared to 9–19 seconds to re-parse the XML. This represents a **28–64× speedup** for repeated scans.
+Plus the compute savings: 9 seconds × 3 consumers × 1,000 files = **7.5 CPU-hours/day saved** per consumer application.
 
-Type C’s lower scan throughput (1.5 M vs 6.5 M rows/sec) is due to the HashMap lookup overhead of joining 1M distinct `pmt_inf_id` keys — a characteristic of the data shape, not an Arrow limitation.
+> **The benchmark for this is in `ArrowFileLoadBenchmarkTest`** — it simulates a downstream consumer receiving Arrow IPC files and loading them directly into DuckDB, measuring real load latency on your hardware.
 
-### 5. Arrow IPC Write Speed
-
-| File   | Arrow Size | Write Time | Write Speed  |
-| ------ | ---------- | ---------- | ------------ |
-| Type A | 170.0 MB   | 261 ms     | **651 MB/s** |
-| Type B | 170.0 MB   | 270 ms     | **630 MB/s** |
-| Type C | 308.6 MB   | 441 ms     | **700 MB/s** |
-
-Arrow IPC writes at **~650–700 MB/s** — essentially memcpy speed — because Arrow's in-memory format **is** the on-disk format. No serialization step is needed.
-
-### 6. End-to-End Pipeline Timing
-
-| File   | Parse     | Validate | Write  | **Total**     |
-| ------ | --------- | -------- | ------ | ------------- |
-| Type A | 9,897 ms  | 154 ms   | 261 ms | **10,312 ms** |
-| Type B | 9,062 ms  | 154 ms   | 270 ms | **9,486 ms**  |
-| Type C | 18,869 ms | 672 ms   | 441 ms | **19,982 ms** |
-
-Parsing dominates the pipeline (93–96% of total time). Validation and IPC export together account for only 4–7% of wall time.
-
-### Summary
-
-| Metric                    | Result                                             |
-| ------------------------- | -------------------------------------------------- |
-| **Disk storage**          | 72–74% smaller than formatted XML                  |
-| **Off-heap memory**       | 55–59% less than formatted XML file size           |
-| **Post-parse scan speed** | 1.5–6.5 M rows/sec (28–64× faster than re-parsing) |
-| **IPC write speed**       | ~650–700 MB/s (zero-copy format)                   |
-| **1 GB heap feasibility** | ✓ All files pass — worst case uses 772 MB combined |
-
-### Conclusion
-
-The **real ROI of Arrow is amortised over multiple analytical passes**. The initial XML → Arrow parse is a one-time cost (~63 MB/s on formatted XML). After that, every additional scan, aggregation, or validation runs at columnar speeds (millions of rows/sec) with zero deserialization overhead — and the data can be persisted to IPC files at 650+ MB/s for later reuse without any re-parsing at all.
-
-For a single read-once-discard workload, Arrow adds complexity without benefit. For workloads that **parse once then query repeatedly** — audit, reconciliation, regulatory checks, analytics — Arrow turns a 10–19 second re-parse into a 154–672 ms scan. That’s the payoff.
 
 ## Parser Optimisation Notes
 

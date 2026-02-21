@@ -28,53 +28,38 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Streaming StAX parser for ISO 20022 pain.001.001.09 XML files.
+ * StAX-based implementation of {@link PainParser} for ISO 20022 pain.001.001.09 XML files.
  * <p>
  * Parses the XML using a pull-based StAX approach (no DOM, no JAXB) and writes
- * values <b>directly</b> into three Apache Arrow {@link VectorSchemaRoot}
- * tables:
+ * values directly into three Apache Arrow {@link VectorSchemaRoot} tables:
  * </p>
  * <ol>
  * <li><b>Message</b> — one row per GrpHdr (GroupHeader85)</li>
- * <li><b>Remittance</b> — one row per PmtInf (PaymentInstruction30),
- * batched</li>
- * <li><b>Transaction</b> — one row per CdtTrfTxInf
- * (CreditTransferTransaction34), batched</li>
+ * <li><b>Remittance</b> — one row per PmtInf (PaymentInstruction30), batched</li>
+ * <li><b>Transaction</b> — one row per CdtTrfTxInf (CreditTransferTransaction34), batched</li>
  * </ol>
- * <p>
- * No intermediate POJOs are created; XML text content is pushed straight into
- * Arrow vectors as it is encountered. Batching keeps memory bounded.
- * </p>
  */
-public final class Pain001StaxParser {
+public final class PainParserImpl implements PainParser {
 
-    private static final Logger LOG = LoggerFactory.getLogger(Pain001StaxParser.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PainParserImpl.class);
 
     /** Number of rows per Arrow batch for remittance and transaction tables. */
     private static final int BATCH_SIZE = 65_536;
 
-    private final BufferAllocator allocator;
-    private final Schema messageSchema;
-    private final Schema remittanceSchema;
-    private final Schema transactionSchema;
-
-    public Pain001StaxParser(BufferAllocator allocator) {
-        this.allocator = allocator;
-        this.messageSchema = Pain001ArrowSchema.createMessageSchema();
-        this.remittanceSchema = Pain001ArrowSchema.createRemittanceSchema();
-        this.transactionSchema = Pain001ArrowSchema.createTransactionSchema();
-    }
+    public PainParserImpl() {}
 
     /**
      * Parses a pain.001.001.09 XML file into three Arrow tables.
      *
-     * @param xmlFile path to the XML file
-     * @return an {@link ArrowBatchResult} containing message, remittance, and
-     *         transaction tables
+     * @param xmlFile   path to the XML file
+     * @param allocator Arrow buffer allocator for off-heap memory
+     * @return an {@link ArrowBatchResult} containing message, remittance, and transaction tables
      * @throws IOException        if the file cannot be read
      * @throws XMLStreamException if XML parsing fails
      */
-    public ArrowBatchResult parse(Path xmlFile) throws IOException, XMLStreamException {
+    @Override
+    public ArrowBatchResult parse(Path xmlFile, BufferAllocator allocator)
+            throws IOException, XMLStreamException {
         XMLInputFactory factory = XMLInputFactory.newInstance();
         factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
@@ -84,18 +69,19 @@ public final class Pain001StaxParser {
 
             XMLStreamReader reader = factory.createXMLStreamReader(fis, "UTF-8");
             try {
-                return doParse(reader);
+                return doParse(reader, allocator);
             } finally {
                 reader.close();
             }
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Core parsing state machine
-    // ═══════════════════════════════════════════════════════════════════════════
+    private ArrowBatchResult doParse(XMLStreamReader reader, BufferAllocator allocator)
+            throws XMLStreamException {
 
-    private ArrowBatchResult doParse(XMLStreamReader reader) throws XMLStreamException {
+        Schema messageSchema = Pain001ArrowSchema.createMessageSchema();
+        Schema remittanceSchema = Pain001ArrowSchema.createRemittanceSchema();
+        Schema transactionSchema = Pain001ArrowSchema.createTransactionSchema();
 
         // ── Message table (single root, typically 1 row) ────────────────────
         VectorSchemaRoot msgRoot = VectorSchemaRoot.create(messageSchema, allocator);
@@ -115,16 +101,10 @@ public final class Pain001StaxParser {
         int txRow = 0;
 
         // ── Parsing state ───────────────────────────────────────────────────
-        // Current GrpHdr values (carried as FK into remittance rows)
         String currentMsgId = null;
-
-        // Current PmtInf values (carried as FK into transaction rows)
         String currentPmtInfId = null;
-
-        // Temporary holders for element text being accumulated
         StringBuilder textContent = new StringBuilder();
 
-        // ── Depth flags (O(1) instead of scanning an ArrayList) ─────────
         boolean inGrpHdr = false;
         boolean inPmtInf = false;
         boolean inCdtTrfTxInf = false;
@@ -134,12 +114,11 @@ public final class Pain001StaxParser {
         boolean inCdtrAcct = false;
         boolean inSvcLvl = false;
         boolean inReqdExctnDt = false;
-        boolean inDbtr = false; // direct Dbtr under PmtInf
-        boolean inCdtr = false; // direct Cdtr under CdtTrfTxInf
-        boolean inRgltryRptg = false; // RgltryRptg under CdtTrfTxInf
-        boolean inRgltryRptgDtls = false; // Dtls under RgltryRptg
+        boolean inDbtr = false;
+        boolean inCdtr = false;
+        boolean inRgltryRptg = false;
+        boolean inRgltryRptgDtls = false;
 
-        // Temporary accumulators for current PmtInf fields
         String pmtMtd = null;
         String pmtNbOfTxs = null;
         BigDecimal pmtCtrlSum = null;
@@ -149,13 +128,11 @@ public final class Pain001StaxParser {
         String pmtDbtrAcctIban = null;
         String pmtDbtrAgtBicfi = null;
 
-        // GrpHdr accumulators
         String grpCreDtTm = null;
         String grpNbOfTxs = null;
         BigDecimal grpCtrlSum = null;
         String grpInitgPtyNm = null;
 
-        // CdtTrfTxInf accumulators
         String txInstrId = null;
         String txEndToEndId = null;
         BigDecimal txInstdAmt = null;
@@ -163,8 +140,8 @@ public final class Pain001StaxParser {
         String txCdtrAgtBicfi = null;
         String txCdtrNm = null;
         String txCdtrAcctIban = null;
-        StringBuilder txRmtInfUstrd = null;   // accumulates multiple Ustrd lines
-        StringBuilder txRgltyRptgCd = null;   // accumulates multiple RgltryRptg/Dtls/Cd values
+        StringBuilder txRmtInfUstrd = null;
+        StringBuilder txRgltyRptgCd = null;
 
         long totalTx = 0;
         long totalRmt = 0;
@@ -177,7 +154,6 @@ public final class Pain001StaxParser {
                     String localName = reader.getLocalName();
                     textContent.setLength(0);
 
-                    // Set depth flags — O(1) instead of list scanning
                     switch (localName) {
                         case "GrpHdr" -> inGrpHdr = true;
                         case "PmtInf" -> inPmtInf = true;
@@ -217,7 +193,6 @@ public final class Pain001StaxParser {
                     String localName = reader.getLocalName();
 
                     switch (localName) {
-                        // ── GroupHeader fields → accumulate ──────────────
                         case "MsgId" -> {
                             if (inGrpHdr)
                                 currentMsgId = textContent.toString().trim();
@@ -248,7 +223,6 @@ public final class Pain001StaxParser {
                                 pmtDbtrNm = textContent.toString().trim();
                         }
 
-                        // ── GrpHdr end → write message row ──────────────
                         case "GrpHdr" -> {
                             setVarChar(msgRoot, Pain001ArrowSchema.MSG_ID, msgRow, currentMsgId);
                             setVarChar(msgRoot, Pain001ArrowSchema.MSG_CRE_DT_TM, msgRow, grpCreDtTm);
@@ -259,7 +233,6 @@ public final class Pain001StaxParser {
                             inGrpHdr = false;
                         }
 
-                        // ── PaymentInformation fields → accumulate ──────
                         case "PmtInfId" -> {
                             if (inPmtInf && !inCdtTrfTxInf)
                                 currentPmtInfId = textContent.toString().trim();
@@ -298,7 +271,6 @@ public final class Pain001StaxParser {
                                 pmtDbtrAgtBicfi = textContent.toString().trim();
                         }
 
-                        // ── Container end → clear depth flags ───────────
                         case "SvcLvl" -> inSvcLvl = false;
                         case "ReqdExctnDt" -> inReqdExctnDt = false;
                         case "DbtrAgt" -> inDbtrAgt = false;
@@ -322,7 +294,6 @@ public final class Pain001StaxParser {
                                 inRgltryRptg = false;
                         }
 
-                        // ── PmtInf end → write remittance row ───────────
                         case "PmtInf" -> {
                             setVarChar(rmtRoot, Pain001ArrowSchema.RMT_MSG_ID, rmtRow, currentMsgId);
                             setVarChar(rmtRoot, Pain001ArrowSchema.RMT_PMT_INF_ID, rmtRow, currentPmtInfId);
@@ -337,7 +308,6 @@ public final class Pain001StaxParser {
                             rmtRow++;
                             totalRmt++;
 
-                            // Flush remittance batch if full
                             if (rmtRow >= BATCH_SIZE) {
                                 rmtRoot.setRowCount(rmtRow);
                                 rmtBatches.add(rmtRoot);
@@ -346,7 +316,6 @@ public final class Pain001StaxParser {
                                 rmtRow = 0;
                             }
 
-                            // Reset PmtInf accumulators and depth flag
                             inPmtInf = false;
                             currentPmtInfId = null;
                             pmtMtd = null;
@@ -359,7 +328,6 @@ public final class Pain001StaxParser {
                             pmtDbtrAgtBicfi = null;
                         }
 
-                        // ── CdtTrfTxInf fields → accumulate ────────────
                         case "InstrId" -> {
                             if (inCdtTrfTxInf)
                                 txInstrId = textContent.toString().trim();
@@ -388,7 +356,6 @@ public final class Pain001StaxParser {
                             }
                         }
 
-                        // ── CdtTrfTxInf end → write transaction row ────
                         case "CdtTrfTxInf" -> {
                             setVarChar(txRoot, Pain001ArrowSchema.TX_PMT_INF_ID, txRow, currentPmtInfId);
                             setVarChar(txRoot, Pain001ArrowSchema.TX_INSTR_ID, txRow, txInstrId);
@@ -405,7 +372,6 @@ public final class Pain001StaxParser {
                             txRow++;
                             totalTx++;
 
-                            // Reset tx accumulators and depth flag
                             txInstrId = null;
                             txEndToEndId = null;
                             txInstdAmt = null;
@@ -417,7 +383,6 @@ public final class Pain001StaxParser {
                             txRgltyRptgCd = null;
                             inCdtTrfTxInf = false;
 
-                            // Flush transaction batch if full
                             if (txRow >= BATCH_SIZE) {
                                 txRoot.setRowCount(txRow);
                                 txBatches.add(txRoot);
@@ -429,7 +394,6 @@ public final class Pain001StaxParser {
                         }
 
                         default -> {
-                            // ignore other elements
                         }
                     }
 
@@ -461,10 +425,6 @@ public final class Pain001StaxParser {
         return new ArrowBatchResult(msgRoot, rmtBatches, txBatches);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Arrow vector writers — write directly into vectors, no POJOs
-    // ═══════════════════════════════════════════════════════════════════════════
-
     private static void setVarChar(VectorSchemaRoot root, String fieldName,
             int index, String value) {
         VarCharVector vec = (VarCharVector) root.getVector(fieldName);
@@ -479,7 +439,6 @@ public final class Pain001StaxParser {
             int index, BigDecimal value) {
         DecimalVector vec = (DecimalVector) root.getVector(fieldName);
         if (value != null) {
-            // Arrow requires exact scale match — rescale to the vector's declared scale
             int vectorScale = vec.getScale();
             vec.setSafe(index, value.setScale(vectorScale, java.math.RoundingMode.HALF_UP));
         } else {

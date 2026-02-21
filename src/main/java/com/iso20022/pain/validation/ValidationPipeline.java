@@ -1,6 +1,6 @@
 package com.iso20022.pain.validation;
 
-import com.iso20022.pain.dal.Pain001Repository;
+import com.iso20022.pain.dal.PaymentRepository;
 import com.iso20022.pain.validation.validators.ControlSumValidator;
 import com.iso20022.pain.validation.validators.MessageValidator;
 import com.iso20022.pain.validation.validators.RemittanceValidator;
@@ -120,7 +120,7 @@ public final class ValidationPipeline {
      * @param repository the SQL-based DAL providing access to the pain.001 tables
      * @return the validation context with all errors and warnings
      */
-    public ValidationContext execute(Pain001Repository repository) {
+    public ValidationContext execute(PaymentRepository repository) {
         ValidationContext context = new ValidationContext();
         Instant start = Instant.now();
 
@@ -185,7 +185,7 @@ public final class ValidationPipeline {
         return executionMode;
     }
 
-    private void executeWithVirtualThreads(Pain001Repository repository, ValidationContext context,
+    private void executeWithVirtualThreads(PaymentRepository repository, ValidationContext context,
             List<Validator> validators) {
         LOG.debug("Using virtual threads for {} parallel validators", validators.size());
 
@@ -207,7 +207,7 @@ public final class ValidationPipeline {
         }
     }
 
-    private void executeWithPlatformThreads(Pain001Repository repository, ValidationContext context,
+    private void executeWithPlatformThreads(PaymentRepository repository, ValidationContext context,
             List<Validator> validators) {
         LOG.debug("Using platform threads for {} parallel validators", validators.size());
 
@@ -230,7 +230,7 @@ public final class ValidationPipeline {
         }
     }
 
-    private void executeValidator(Validator validator, Pain001Repository repository,
+    private void executeValidator(Validator validator, PaymentRepository repository,
             ValidationContext context) {
         Instant start = Instant.now();
         try {

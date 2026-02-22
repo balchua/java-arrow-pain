@@ -1,25 +1,31 @@
 package com.iso20022.pain;
 
 import com.iso20022.pain.arrow.ArrowBatchResult;
-import com.iso20022.pain.arrow.ArrowFileExporter;
+import com.iso20022.pain.arrow.Pain001ArrowSchema;
 import com.iso20022.pain.benchmark.LoadBenchmark;
 import com.iso20022.pain.dal.PaymentRepository;
 import com.iso20022.pain.dal.PaymentRepositoryImpl;
 import com.iso20022.pain.generator.PainFileSpec;
 import com.iso20022.pain.generator.TestFileGenerator;
 import com.iso20022.pain.generator.TestPainFileSpecs;
+import com.iso20022.pain.parser.BatchConsumer;
 import com.iso20022.pain.parser.PainParser;
 import com.iso20022.pain.parser.PainParserImpl;
+import com.iso20022.pain.parser.StreamingBatchConsumer;
+import com.iso20022.pain.persistence.LocalFilePersistenceService;
 import com.iso20022.pain.validation.ValidationContext;
 import com.iso20022.pain.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,22 +36,10 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Full pipeline benchmark for all file types A–E.
  *
- * <p>Exercises the complete XML → Arrow (parse) → DuckDB (load) →
- * SQL Validation → Arrow IPC Write pipeline for every type,
+ * <p>Exercises the complete XML → Arrow (streaming parse) → DuckDB (live INSERT) →
+ * Arrow IPC Stream Write → SQL Validation pipeline for every type,
  * capturing the same metrics that {@link LoadBenchmark} records
- * when {@code App} is run from the command line:</p>
- * <ul>
- *   <li>XML file size</li>
- *   <li>XML → Arrow parse time and throughput</li>
- *   <li>Arrow off-heap allocated and peak memory</li>
- *   <li>Java heap delta (before / after GC boundary)</li>
- *   <li>DuckDB registration (Arrow C Data Interface load) time</li>
- *   <li>SQL Validation time</li>
- *   <li>Arrow IPC write time and output file sizes</li>
- * </ul>
- *
- * <p>Each type's full {@link LoadBenchmark#toReport()} is printed to stdout,
- * followed by a consolidated summary table.</p>
+ * when {@code App} is run from the command line.</p>
  */
 class FullPipelineBenchmarkTest {
 
@@ -99,7 +93,13 @@ class FullPipelineBenchmarkTest {
         Path xmlFile = TestFileGenerator.generateIfAbsent(spec);
 
         String label = spec.name();
+        String baseName = spec.fileName().replaceAll("\\.[xX][mM][lL]$", "");
         LoadBenchmark benchmark = new LoadBenchmark(label);
+        benchmark.setDuckDbMemoryLimitBytes(LoadBenchmark.parseDuckDbMemoryLimit("1GB"));
+
+        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
+        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
+        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
 
         long fileSizeBytes = Files.size(xmlFile);
         benchmark.setXmlFileSizeBytes(fileSizeBytes);
@@ -110,7 +110,7 @@ class FullPipelineBenchmarkTest {
         benchmark.setHeapMaxBytes(Runtime.getRuntime().maxMemory());
 
         long parseMs;
-        long duckdbMs;
+        long duckdbMs = 0;
         long validateMs;
         long writeMs;
         long offHeapAllocated;
@@ -124,53 +124,64 @@ class FullPipelineBenchmarkTest {
 
             PainParser parser = new PainParserImpl();
 
+            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("SET memory_limit='1GB'");
+            }
+
+            Files.createDirectories(OUTPUT_DIR);
+            LocalFilePersistenceService persistence = new LocalFilePersistenceService(
+                    OUTPUT_DIR, baseName, msgSchema, rmtSchema, txSchema);
+
+            StreamingBatchConsumer streamingConsumer =
+                    new StreamingBatchConsumer(conn, persistence, allocator);
+
+            BatchConsumer wrappedConsumer = (tableType, root) -> {
+                streamingConsumer.accept(tableType, root);
+                benchmark.sampleOffHeap(allocator.getAllocatedMemory());
+            };
+
             Instant parseStart = Instant.now();
-            ArrowBatchResult result = parser.parse(xmlFile, allocator);
+            var stats = parser.parseStreaming(xmlFile, allocator, wrappedConsumer);
             Duration parseDuration = Duration.between(parseStart, Instant.now());
             parseMs = parseDuration.toMillis();
             benchmark.recordPhase("XML\u2192Arrow Parse", parseDuration);
 
-            try (result) {
-                benchmark.setTotalRows(result.getTransactionRowCount());
-                benchmark.setMessageRows(result.getMessageRowCount());
-                benchmark.setRemittanceRows(result.getRemittanceRowCount());
+            benchmark.setTotalRows(stats.transactionRows());
+            benchmark.setMessageRows(stats.messageRows());
+            benchmark.setRemittanceRows(stats.remittanceRows());
 
-                offHeapAllocated = allocator.getAllocatedMemory();
-                benchmark.setOffHeapAllocatedBytes(offHeapAllocated);
-                benchmark.setOffHeapPeakBytes(allocator.getPeakMemoryAllocation());
+            offHeapAllocated = allocator.getAllocatedMemory();
+            benchmark.setOffHeapAllocatedBytes(offHeapAllocated);
+            benchmark.setOffHeapPeakBytes(allocator.getPeakMemoryAllocation());
 
-                Instant duckdbStart = Instant.now();
-                try (PaymentRepository repository = new PaymentRepositoryImpl(result, allocator)) {
-                    Duration duckdbDuration = Duration.between(duckdbStart, Instant.now());
-                    duckdbMs = duckdbDuration.toMillis();
-                    benchmark.recordPhase("DuckDB Registration", duckdbDuration);
+            Instant writeStart = Instant.now();
+            persistence.finish();
+            Duration writeDuration = Duration.between(writeStart, Instant.now());
+            writeMs = writeDuration.toMillis();
+            benchmark.recordPhase("Arrow IPC Write", writeDuration);
+            arrowBytes = persistence.getBytesWritten();
+            benchmark.setArrowFileSizeBytes(arrowBytes);
 
-                    Instant valStart = Instant.now();
-                    ValidationContext valContext = ValidationPipeline.standard().execute(repository);
-                    Duration valDuration = Duration.between(valStart, Instant.now());
-                    validateMs = valDuration.toMillis();
-                    benchmark.recordPhase("SQL Validation", valDuration);
+            Instant valStart = Instant.now();
+            try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
+                ValidationContext valContext = ValidationPipeline.standard().execute(repository);
+                Duration valDuration = Duration.between(valStart, Instant.now());
+                validateMs = valDuration.toMillis();
+                benchmark.recordPhase("SQL Validation", valDuration);
 
-                    validationPassed = !valContext.hasErrors();
-                    benchmark.setValidationResult(
-                            validationPassed,
-                            result.getRemittanceRowCount(),
-                            result.getTransactionRowCount(),
-                            valContext.hasErrors() ? valContext.getErrors().size() : 0);
-                }
+                validationPassed = !valContext.hasErrors();
+                benchmark.setValidationResult(
+                        validationPassed,
+                        stats.remittanceRows(),
+                        stats.transactionRows(),
+                        valContext.hasErrors() ? valContext.getErrors().size() : 0);
 
-                String fileName = xmlFile.getFileName().toString();
-                Instant writeStart = Instant.now();
-                arrowBytes = ArrowFileExporter.export(result, allocator, OUTPUT_DIR, fileName);
-                Duration writeDuration = Duration.between(writeStart, Instant.now());
-                writeMs = writeDuration.toMillis();
-                benchmark.recordPhase("Arrow IPC Write", writeDuration);
-                benchmark.setArrowFileSizeBytes(arrowBytes);
-
-                offHeapPeak = allocator.getPeakMemoryAllocation();
-                benchmark.setOffHeapPeakBytes(offHeapPeak);
-                txRows = result.getTransactionRowCount();
+                txRows = stats.transactionRows();
             }
+
+            offHeapPeak = allocator.getPeakMemoryAllocation();
+            benchmark.setOffHeapPeakBytes(offHeapPeak);
         }
 
         benchmark.setHeapUsedAfterBytes(LoadBenchmark.captureHeapUsed());
@@ -214,3 +225,4 @@ class FullPipelineBenchmarkTest {
         System.out.println();
     }
 }
+

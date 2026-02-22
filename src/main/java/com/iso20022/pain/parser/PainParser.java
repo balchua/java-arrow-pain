@@ -21,4 +21,18 @@ public interface PainParser {
      */
     ArrowBatchResult parse(Path xmlFile, BufferAllocator allocator)
             throws IOException, XMLStreamException;
+
+    /**
+     * Streaming parse — invokes {@code consumer} once per finalized batch.
+     * Arrow RAM is cleared after each consumer callback; memory stays flat.
+     *
+     * @param xmlFile   path to an existing pain.001.001.09 XML file
+     * @param allocator Arrow buffer allocator for off-heap memory
+     * @param consumer  callback invoked once per finalized batch
+     * @return lightweight parse statistics
+     * @throws IOException        on I/O failure
+     * @throws XMLStreamException on XML parse failure
+     */
+    ParseStats parseStreaming(Path xmlFile, BufferAllocator allocator, BatchConsumer consumer)
+            throws IOException, XMLStreamException;
 }

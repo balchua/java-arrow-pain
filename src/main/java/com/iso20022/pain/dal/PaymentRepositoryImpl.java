@@ -66,6 +66,17 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
                 result.getTransactionRowCount());
     }
 
+    /**
+     * Connects to a pre-populated DuckDB instance. No data loading occurs.
+     * Used by the streaming pipeline where tables are populated live during parsing.
+     *
+     * @param conn a DuckDB connection whose tables are already populated
+     */
+    public PaymentRepositoryImpl(DuckDBConnection conn) {
+        this.conn = conn;
+        this.allocator = null;
+    }
+
     private void loadViaStream(String tableName, List<VectorSchemaRoot> batches)
             throws Exception {
 
@@ -405,8 +416,10 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
         conn.close();
         // THEN close the Arrow stream objects. The release callbacks have already fired,
         // so the Arrow allocator can reclaim the memory without conflict.
-        for (AutoCloseable c : deferredCloseables) {
-            closeSilently(c);
+        if (allocator != null) {
+            for (AutoCloseable c : deferredCloseables) {
+                closeSilently(c);
+            }
         }
         LOG.debug("PaymentRepositoryImpl closed");
     }

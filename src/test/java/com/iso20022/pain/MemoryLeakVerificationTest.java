@@ -1,19 +1,28 @@
 package com.iso20022.pain;
 
 import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.arrow.Pain001ArrowSchema;
 import com.iso20022.pain.dal.PaymentRepository;
 import com.iso20022.pain.dal.PaymentRepositoryImpl;
 import com.iso20022.pain.generator.TestFileGenerator;
 import com.iso20022.pain.generator.TestPainFileSpecs;
+import com.iso20022.pain.parser.BatchConsumer;
 import com.iso20022.pain.parser.PainParser;
 import com.iso20022.pain.parser.PainParserImpl;
+import com.iso20022.pain.parser.StreamingBatchConsumer;
+import com.iso20022.pain.persistence.LocalFilePersistenceService;
 import com.iso20022.pain.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.sql.DriverManager;
 import java.util.LongSummaryStatistics;
 import java.util.stream.LongStream;
 
@@ -23,15 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * Verifies that the full parse → load → validate pipeline does not leak Arrow
  * allocator memory across repeated iterations — simulating a long-running process.
  *
- * <p>DuckDB &ge;1.4.4.0 fixes the native connection-level leak (issue #9712).
- * {@link PaymentRepositoryImpl} also closes Arrow C Data Interface resources
- * <em>after</em> {@code conn.close()}, ensuring DuckDB has already invoked all
- * C Data Interface release callbacks before the Arrow allocator is checked.</p>
- *
- * <p>A single {@link RootAllocator} is shared across all iterations.
- * After each iteration {@link BufferAllocator#getAllocatedMemory()} must be
- * exactly {@code 0} — any non-zero value indicates an Arrow allocator leak.
- * Per-iteration timings are collected and a summary table is printed to stdout.</p>
+ * <p>Both the legacy path and the streaming path are tested.</p>
  */
 class MemoryLeakVerificationTest {
 
@@ -52,10 +53,16 @@ class MemoryLeakVerificationTest {
         runLeakCheck(file, ITERATIONS, "Type E (invalid CtrlSum, 2×100)");
     }
 
+    @Test
+    @DisplayName("Type D: no Arrow allocator leak over 3 streaming iterations")
+    void noLeakStreamingTypeDValidFile() throws Exception {
+        Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
+        runStreamingLeakCheck(file, 3, "Type D streaming (valid, 2×100)");
+    }
+
     /**
-     * Runs the full pipeline {@code iterations} times with a shared allocator,
+     * Runs the full legacy pipeline {@code iterations} times with a shared allocator,
      * asserting zero bytes remain allocated after each iteration.
-     * Prints a performance summary table to stdout.
      */
     private static void runLeakCheck(Path xmlFile, int iterations, String label)
             throws Exception {
@@ -92,6 +99,64 @@ class MemoryLeakVerificationTest {
         printSummary(label, iterations, parseTimes, loadTimes, validateTimes);
     }
 
+    /**
+     * Runs the full streaming pipeline {@code iterations} times with a shared allocator,
+     * asserting zero bytes remain allocated after each iteration.
+     */
+    private static void runStreamingLeakCheck(Path xmlFile, int iterations, String label)
+            throws Exception {
+
+        Path outputDir = Paths.get("src", "test", "resources", "output");
+        Files.createDirectories(outputDir);
+
+        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
+        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
+        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
+
+        long[] parseTimes = new long[iterations];
+
+        try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
+            PainParser parser = new PainParserImpl();
+
+            for (int i = 0; i < iterations; i++) {
+                String baseName = "leak_check_iter_" + i;
+                long t0 = System.currentTimeMillis();
+
+                DuckDBConnection conn = (DuckDBConnection)
+                        DriverManager.getConnection("jdbc:duckdb:");
+                try (var stmt = conn.createStatement()) {
+                    stmt.execute("SET memory_limit='512MB'");
+                }
+
+                try (LocalFilePersistenceService persistence =
+                        new LocalFilePersistenceService(outputDir, baseName,
+                                msgSchema, rmtSchema, txSchema)) {
+
+                    StreamingBatchConsumer consumer =
+                            new StreamingBatchConsumer(conn, persistence, allocator);
+                    parser.parseStreaming(xmlFile, allocator, consumer);
+                    persistence.finish();
+                }
+
+                try (PaymentRepository repo = new PaymentRepositoryImpl(conn)) {
+                    ValidationPipeline.standard().execute(repo);
+                }
+
+                parseTimes[i] = System.currentTimeMillis() - t0;
+
+                long leaked = allocator.getAllocatedMemory();
+                assertEquals(0L, leaked,
+                        String.format("[%s] Arrow allocator leak detected after streaming iteration %d/%d:"
+                                + " %,d bytes still allocated", label, i + 1, iterations, leaked));
+            }
+        }
+
+        LongSummaryStatistics parseStats = LongStream.of(parseTimes).summaryStatistics();
+        System.out.printf("%n[%s] Streaming leak check: %d iterations, 0 bytes leaked.%n"
+                + "  Parse time — min: %,d ms, max: %,d ms, avg: %,.1f ms%n",
+                label, iterations, parseStats.getMin(), parseStats.getMax(), parseStats.getAverage());
+    }
+
     private static void printSummary(String label, int iterations,
             long[] parseTimes, long[] loadTimes, long[] validateTimes) {
 
@@ -126,3 +191,4 @@ class MemoryLeakVerificationTest {
                 String.format("%,.1f", stats.getAverage()));
     }
 }
+

@@ -1,6 +1,6 @@
 package com.iso20022.pain;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.arrow.Pain001ArrowSchema;
 import com.iso20022.pain.dal.PaymentRepository;
 import com.iso20022.pain.dal.PaymentRepositoryImpl;
 import com.iso20022.pain.generator.PainFileSpec;
@@ -8,12 +8,20 @@ import com.iso20022.pain.generator.TestFileGenerator;
 import com.iso20022.pain.generator.TestPainFileSpecs;
 import com.iso20022.pain.parser.PainParser;
 import com.iso20022.pain.parser.PainParserImpl;
+import com.iso20022.pain.parser.ParseStats;
+import com.iso20022.pain.parser.StreamingBatchConsumer;
+import com.iso20022.pain.persistence.LocalFilePersistenceService;
 import com.iso20022.pain.validation.ValidationContext;
 import com.iso20022.pain.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.duckdb.DuckDBConnection;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,29 +49,49 @@ public final class SampleGeneratorRunner {
             long genMs = System.currentTimeMillis() - start;
             System.out.printf("  ✓ Generated in %d ms → %s%n", genMs, xmlFile);
 
+            String baseName = spec.fileName().replaceAll("\\.[xX][mM][lL]$", "");
+            Path outputDir = Paths.get("src", "test", "resources", "output");
+            Files.createDirectories(outputDir);
+
+            Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
+            Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
+            Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
+
             try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
                 PainParser parser = new PainParserImpl();
+                DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+                try (var stmt = conn.createStatement()) {
+                    stmt.execute("SET memory_limit='1GB'");
+                }
+
                 long parseStart = System.currentTimeMillis();
-                try (ArrowBatchResult result = parser.parse(xmlFile, allocator)) {
-                    long parseMs = System.currentTimeMillis() - parseStart;
-                    System.out.printf("  ✓ Parsed in %d ms (%d remittances, %d transactions)%n",
-                            parseMs, result.getRemittanceRowCount(), result.getTransactionRowCount());
+                ParseStats stats;
+                try (LocalFilePersistenceService persistence =
+                        new LocalFilePersistenceService(outputDir, baseName,
+                                msgSchema, rmtSchema, txSchema)) {
+                    StreamingBatchConsumer consumer =
+                            new StreamingBatchConsumer(conn, persistence, allocator);
+                    stats = parser.parseStreaming(xmlFile, allocator, consumer);
+                    persistence.finish();
+                }
+                long parseMs = System.currentTimeMillis() - parseStart;
+                System.out.printf("  ✓ Parsed in %d ms (%d remittances, %d transactions)%n",
+                        parseMs, stats.remittanceRows(), stats.transactionRows());
 
-                    try (PaymentRepository repository = new PaymentRepositoryImpl(result, allocator)) {
-                        long valStart = System.currentTimeMillis();
-                        ValidationContext context = ValidationPipeline.standard().execute(repository);
-                        long valMs = System.currentTimeMillis() - valStart;
+                try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
+                    long valStart = System.currentTimeMillis();
+                    ValidationContext context = ValidationPipeline.standard().execute(repository);
+                    long valMs = System.currentTimeMillis() - valStart;
 
-                        if (context.hasErrors()) {
-                            System.out.printf("  ✗ Validation: %d error(s) in %d ms%n",
-                                    context.getErrors().size(), valMs);
-                            context.getErrors().stream().limit(5).forEach(e ->
-                                    System.out.printf("      [%s] %s: %s%n",
-                                            e.validator(), e.message(),
-                                            e.details().length > 0 ? e.details()[0] : ""));
-                        } else {
-                            System.out.printf("  ✓ Validation passed in %d ms%n", valMs);
-                        }
+                    if (context.hasErrors()) {
+                        System.out.printf("  ✗ Validation: %d error(s) in %d ms%n",
+                                context.getErrors().size(), valMs);
+                        context.getErrors().stream().limit(5).forEach(e ->
+                                System.out.printf("      [%s] %s: %s%n",
+                                        e.validator(), e.message(),
+                                        e.details().length > 0 ? e.details()[0] : ""));
+                    } else {
+                        System.out.printf("  ✓ Validation passed in %d ms%n", valMs);
                     }
                 }
             }
@@ -97,3 +125,4 @@ public final class SampleGeneratorRunner {
         return specs;
     }
 }
+

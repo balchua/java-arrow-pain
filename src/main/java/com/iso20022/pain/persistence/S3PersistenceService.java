@@ -29,6 +29,7 @@ public final class S3PersistenceService implements PersistenceService {
     private static final int PART_SIZE = 5 * 1024 * 1024; // 5 MB minimum for S3 multipart
 
     private final S3Client s3Client;
+    private final boolean ownS3Client;
     private final String bucket;
     private final String keyPrefix;
     private final String baseName;
@@ -42,8 +43,10 @@ public final class S3PersistenceService implements PersistenceService {
 
     /**
      * Creates a new service that streams Arrow IPC batches to S3 via multipart upload.
+     * The provided {@code s3Client} is NOT closed when this service is closed — the
+     * caller retains ownership.
      *
-     * @param s3Client          the AWS S3 client
+     * @param s3Client          the AWS S3 client (caller-owned; not closed on finish)
      * @param bucket            target S3 bucket name
      * @param keyPrefix         S3 key prefix (folder)
      * @param baseName          base name for output files
@@ -55,6 +58,30 @@ public final class S3PersistenceService implements PersistenceService {
             String baseName, Schema messageSchema, Schema remittanceSchema,
             Schema transactionSchema) {
         this.s3Client = s3Client;
+        this.ownS3Client = false;
+        this.bucket = bucket;
+        this.keyPrefix = keyPrefix;
+        this.baseName = baseName;
+        this.messageSchema = messageSchema;
+        this.remittanceSchema = remittanceSchema;
+        this.transactionSchema = transactionSchema;
+    }
+
+    /**
+     * Creates a new service, building its own default {@link S3Client} which is
+     * closed when {@link #finish()} or {@link #close()} is called.
+     *
+     * @param bucket            target S3 bucket name
+     * @param keyPrefix         S3 key prefix (folder)
+     * @param baseName          base name for output files
+     * @param messageSchema     Arrow schema for the message table
+     * @param remittanceSchema  Arrow schema for the remittance table
+     * @param transactionSchema Arrow schema for the transaction table
+     */
+    public S3PersistenceService(String bucket, String keyPrefix, String baseName,
+            Schema messageSchema, Schema remittanceSchema, Schema transactionSchema) {
+        this.s3Client = S3Client.create();
+        this.ownS3Client = true;
         this.bucket = bucket;
         this.keyPrefix = keyPrefix;
         this.baseName = baseName;
@@ -119,6 +146,9 @@ public final class S3PersistenceService implements PersistenceService {
     @Override
     public void close() throws IOException {
         finish();
+        if (ownS3Client) {
+            s3Client.close();
+        }
     }
 
     // ── Internal: one multipart upload per table ──────────────────────────────

@@ -19,6 +19,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Implements {@link BatchConsumer}. On each {@link #accept} call:
@@ -33,6 +34,8 @@ import java.util.List;
  * {@code CREATE TABLE IF NOT EXISTS}.</p>
  */
 public final class StreamingBatchConsumer implements BatchConsumer {
+
+    private static final AtomicLong TMP_SEQ = new AtomicLong(0);
 
     private final DuckDBConnection conn;
     private final PersistenceService persistenceService;
@@ -114,7 +117,7 @@ public final class StreamingBatchConsumer implements BatchConsumer {
         };
 
         // Use a unique temporary view name to avoid collisions
-        String tmpName = "_tmp_" + tableName + "_" + System.nanoTime();
+        String tmpName = "_tmp_" + tableName + "_" + TMP_SEQ.getAndIncrement();
 
         // Create a single-batch reader that serves the current root
         SingleBatchArrowReader reader = new SingleBatchArrowReader(root, allocator);

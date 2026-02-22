@@ -12,6 +12,285 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
 | ------------ | ------------------------------------------------- |
 | Java         | 17+ (virtual thread support via reflection on 21+) |
 | Apache Arrow | 15.0.2 (`arrow-vector`, `arrow-memory-unsafe`)    |
+| DuckDB       | 1.4.4.0 (`duckdb_jdbc`) — in-process SQL engine   |
+| XML Parser   | StAX (`javax.xml.stream`) — streaming pull parser |
+| AWS SDK v2   | 2.25.23 (`s3`) — optional, for S3 persistence mode |
+| Build        | Maven 3.9.6                                       |
+| Logging      | SLF4J 2.0.12                                      |
+
+## Architecture
+
+```
+┌─────────────┐    StAX      ┌──────────────────────────────────────────────┐
+│  pain.001   │──streaming──▶│  PainParserImpl.parseStreaming()              │
+│  XML file   │   parse      │  (one VectorSchemaRoot per table, reused)     │
+└─────────────┘               └──────────────┬───────────────────────────────┘
+                                              │ BatchConsumer.accept() per 65k rows
+                                              ▼
+                              ┌──────────────────────────────────────────────┐
+                              │  StreamingBatchConsumer                      │
+                              │  ├─ Sink A: DuckDB (C Data Interface INSERT) │
+                              │  └─ Sink B: PersistenceService               │
+                              │       ├─ LocalFilePersistenceService (local) │
+                              │       └─ S3PersistenceService (S3 upload)    │
+                              └──────────────────────────────────────────────┘
+                                  │                         │
+                                  ▼                         ▼
+                         ┌─────────────────┐    ┌───────────────────────┐
+                         │  DuckDB         │    │  .arrows files        │
+                         │  (live tables)  │    │  (IPC Stream format)  │
+                         └────────┬────────┘    └───────────────────────┘
+                                  │
+                              SQL Validation
+```
+
+The XML is parsed in a **single streaming pass** directly into three relational Arrow tables:
+
+| Table           | Source Element                              | Key                              | Description                                                                    |
+| --------------- | ------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------ |
+| **Message**     | `GrpHdr` (GroupHeader85)                    | `msg_id` (PK)                    | One row per file — message ID, creation timestamp, total count, control sum    |
+| **Remittance**  | `PmtInf` (PaymentInstruction30)             | `pmt_inf_id` (PK), `msg_id` (FK) | One row per payment block — debtor info, control sum, execution date           |
+| **Transaction** | `CdtTrfTxInf` (CreditTransferTransaction34) | `pmt_inf_id` (FK)                | One row per credit transfer — amount, currency, creditor info, remittance info |
+
+Arrow type mappings follow ISO 20022 data type definitions:
+- Text fields (`Max35Text`, `Max140Text`, IBAN, BIC) → `Utf8`
+- Control sums (`DecimalNumber`) → `Decimal128(18, 2)`
+- Transaction amounts (`ActiveOrHistoricCurrencyAndAmount`) → `Decimal128(18, 5)`
+- Dates (`ISODate`) → `Date(DAY)`
+
+> **IPC Stream vs IPC File**: The pipeline writes Arrow IPC **Stream** format (`.arrows`), not the older IPC **File** format (`.arrow`). Stream format has no footer and supports incremental writes. The trade-off is that random-access batch seeking is not possible, but for sequential processing (S3 upload, DuckDB `read_ipc`) this is irrelevant.
+
+## Configuration
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `PAIN_PERSISTENCE_MODE` | `local` | Output sink: `local` or `s3` |
+| `PAIN_LOCAL_OUTPUT_DIR` | `src/main/resources/output` | Local output directory for Arrow IPC Stream files |
+| `PAIN_S3_BUCKET` | _(required for s3 mode)_ | Target S3 bucket name |
+| `PAIN_S3_KEY_PREFIX` | `pain001` | S3 key prefix (folder) |
+
+## Project Structure
+
+```
+src/main/java/com/iso20022/pain/
+├── App.java                          # Entry point — requires an existing pain.001 XML file path
+├── arrow/
+│   ├── Pain001ArrowSchema.java       # Arrow schema definitions for all 3 tables
+│   └── ArrowBatchResult.java         # Legacy batch holder (used by --legacy path only)
+│   # ArrowFileExporter.java — REMOVED (superseded by LocalFilePersistenceService)
+├── parser/
+│   ├── PainParser.java               # Interface: parse() [legacy] + parseStreaming()
+│   ├── PainParserImpl.java           # StAX impl — streaming path clears RAM per batch
+│   ├── BatchConsumer.java            # @FunctionalInterface: per-batch callback
+│   ├── ParseStats.java               # Lightweight result: (msgRows, rmtRows, txRows)
+│   └── StreamingBatchConsumer.java   # Dual-sink: DuckDB live INSERT + PersistenceService
+├── persistence/
+│   ├── PersistenceService.java       # Interface: writeBatch() + finish()
+│   ├── LocalFilePersistenceService.java  # Streams .arrows to configurable local dir
+│   ├── S3PersistenceService.java     # Streams .arrows to S3 multipart upload
+│   └── PersistenceServiceFactory.java   # Creates service from env vars
+├── generator/
+│   └── PainFileSpec.java             # Data record: file spec (name, counts, invalidControlSum flag)
+├── dal/
+│   ├── PaymentRepository.java        # Interface: SQL access to message/remittance/transaction tables
+│   └── PaymentRepositoryImpl.java    # DuckDB implementation (zero-copy Arrow C Data Interface)
+├── validation/
+│   ├── Validator.java                # Interface: validate(PaymentRepository, ValidationContext)
+│   ├── ValidationContext.java        # Thread-safe error/warning collection
+│   ├── ValidationPipeline.java       # Fluent builder with virtual thread support
+│   ├── ExecutionMode.java            # SEQUENTIAL, PARALLEL, AUTO modes
+│   ├── ChainedValidator.java         # andThen() implementation
+│   ├── VirtualThreadValidator.java   # Abstract base for virtual thread execution
+│   └── validators/
+│       ├── MessageValidator.java     # SQL: MsgId length, InitgPty, CreDtTm
+│       ├── RemittanceValidator.java  # SQL: IBAN format, payment method
+│       ├── TransactionValidator.java # SQL: amounts > 0, creditor names
+│       ├── ControlSumValidator.java  # SQL: JOIN-based control sum validation
+│       └── ParallelTransactionValidator.java  # Batch-parallel transaction validator
+└── benchmark/
+    └── LoadBenchmark.java            # Timing, memory tracking, formatted report
+
+src/test/java/com/iso20022/pain/
+├── SampleGenerationTest.java         # JUnit 5: Type D (valid) + Type E (invalid CtrlSum)
+├── StreamingPipelineTest.java        # JUnit 5: streaming memory, row counts, .arrows files
+├── ArrowFileLoadBenchmarkTest.java   # JUnit 5: Arrow IPC Stream → DuckDB load speed benchmark
+├── MemoryLeakVerificationTest.java   # JUnit 5: 50-iteration leak verification (legacy + streaming)
+├── FullPipelineBenchmarkTest.java    # JUnit 5: Full streaming pipeline A–E benchmark
+├── SampleGeneratorRunner.java        # Runnable main: generate by type (a–e)
+└── generator/
+    ├── PainXmlGenerator.java         # Interface: generate(PainFileSpec, Path) → Path
+    ├── PainXmlGeneratorImpl.java     # StAX implementation (honours invalidControlSum)
+    ├── TestPainFileSpecs.java        # Test-only spec constants A–E
+    └── TestFileGenerator.java        # generate-if-absent + file-complete check
+```
+
+## Test Files
+
+| Type | File | Structure | Remittances | Txns/Block | Total Txns | Purpose |
+|---|---|---|---|---|---|---|
+| A | `pain001_type_a_1x1M.xml` | Fat batch | 1 | 1,000,000 | 1,000,000 | Benchmark |
+| B | `pain001_type_b_2x500K.xml` | Two batches | 2 | 500,000 | 1,000,000 | Benchmark |
+| C | `pain001_type_c_1Mx1.xml` | Many small | 1,000,000 | 1 | 1,000,000 | Benchmark |
+| D | `pain001_type_d_2x100_valid.xml` | Small valid | 2 | 100 | 200 | Unit test |
+| E | `pain001_type_e_2x100_invalid_ctrlsum.xml` | Small invalid | 2 | 100 | 200 | Negative test |
+
+> Types A–C are large files (387–1,199 MB) not committed to the repo. Types D–E are fast-generation test files generated automatically by `mvn test`.
+
+## Running
+
+```bash
+# Prerequisites: Java 21+, Maven 3.9+, --add-opens for Arrow unsafe allocator
+
+# Local mode (default) — output goes to src/main/resources/output/
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.args="path/to/pain001.xml"
+
+# Local mode with custom output directory
+PAIN_LOCAL_OUTPUT_DIR=/data/arrow-output \
+  MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.args="path/to/pain001.xml"
+
+# S3 mode
+PAIN_PERSISTENCE_MODE=s3 \
+PAIN_S3_BUCKET=my-bucket \
+PAIN_S3_KEY_PREFIX=pain001/2026/02 \
+  MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.args="path/to/pain001.xml"
+
+# Legacy mode (accumulate all batches in RAM — for comparison only)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.args="path/to/pain001.xml --legacy"
+
+# Generate test sample files (type-d and type-e are fast, A–C are large)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -Dexec.mainClass="com.iso20022.pain.SampleGeneratorRunner" \
+                -Dexec.args="type-d type-e"
+
+# Run all tests (generates Type D and E files as needed, runs benchmark)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" mvn test
+
+# Run the Arrow load benchmark only
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -Dtest=ArrowFileLoadBenchmarkTest
+```
+
+Output Arrow IPC Stream files (`.arrows`) are written to `src/main/resources/output/` (main pipeline) or `src/test/resources/output/` (tests).
+
+## Memory: Before vs After Streaming Refactor
+
+| Metric | Before (batch accumulation) | After (streaming) |
+|---|---|---|
+| Arrow RAM during parse | O(file_size) — all batches live | O(1 batch) ≈ 3 × ~50 MB |
+| Peak pod footprint | Heap + all Arrow batches + DuckDB | Heap + 1 batch + DuckDB |
+| 10 M row file | ~8 GB Arrow off-heap | ~150 MB Arrow off-heap |
+| Pod limit (4 GB) | OOM for large files | Fits comfortably |
+
+## Validation Framework
+
+The project includes a **chainable validation framework** with support for parallel execution using Java 21 virtual threads. The framework validates ISO 20022 compliance beyond just control sums.
+
+### Architecture
+
+```
+ValidationPipeline
+├─ MessageValidator      (parallel)  ─┐
+├─ RemittanceValidator   (parallel)  ─┤ Execute concurrently
+├─ TransactionValidator  (parallel)  ─┘ with virtual threads
+└─ ControlSumValidator   (sequential) ─ Runs after parallel group
+```
+
+### Validators
+
+1. **MessageValidator** — Validates message-level fields
+   - MsgId length ≤ 35 characters
+   - InitgPty (Initiating Party) presence
+   - CreDtTm (Creation DateTime) required
+
+2. **RemittanceValidator** — Validates payment instruction fields
+   - IBAN format: `^[A-Z]{2}[0-9]{2}[A-Z0-9]+$`
+   - Payment method required
+
+3. **TransactionValidator** — Validates transaction fields
+   - Amount must be positive
+   - Creditor name required
+
+4. **ControlSumValidator** — Validates ISO 20022 control sums
+   - Remittance-level control sum validation
+   - Message-level control sum validation
+
+### Usage
+
+```java
+// Streaming pipeline (default): DuckDB is populated live during parseStreaming()
+DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+PersistenceService persistence = PersistenceServiceFactory.create(baseName, msgSchema, rmtSchema, txSchema);
+StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, persistence, allocator);
+ParseStats stats = parser.parseStreaming(xmlFile, allocator, consumer);
+persistence.finish();
+try (PaymentRepository repo = new PaymentRepositoryImpl(conn)) {
+    ValidationContext ctx = ValidationPipeline.standard().execute(repo);
+}
+
+// Legacy pipeline (--legacy flag): accumulate all batches then load
+try (PaymentRepository repo = new PaymentRepositoryImpl(arrowBatchResult, allocator)) {
+    ValidationContext ctx = ValidationPipeline.standard().execute(repo);
+}
+```
+
+---
+
+## Performance Results
+
+See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
+
+- **Full pipeline benchmarks** (all 5 types A–E): XML→Arrow parse, DuckDB registration, SQL validation, Arrow IPC write
+- Java heap delta and Arrow off-heap peak for every type
+- Per-table Arrow file sizes (message, remittance, transaction) for every type
+- Arrow IPC Stream → DuckDB downstream load times (consumer simulation)
+- Memory leak verification: 50-iteration stress test, 0 bytes leaked
+- Full test suite summary (all tests passing)
+
+## Arrow File Sharing via S3
+
+One of Arrow's most compelling production use cases is **sharing pre-parsed data across applications via object storage (e.g. AWS S3, GCS, Azure Blob)** — instead of passing raw XML or JSON and forcing each consumer to re-parse.
+
+### The Arrow IPC Approach
+
+```
+Producer App                        Consumer App A
+  parse XML once (streaming)        download .arrows files (170–309 MB, 55–74% smaller)
+  export Arrow IPC  ──S3──▶         load into DuckDB:  ~50–200 ms  ← benchmark result
+  3 × .arrows files                 run SQL analytics
+
+                    ──S3──▶         Consumer App B: same ~50–200 ms
+                    ──S3──▶         Consumer App C: same ~50–200 ms
+```
+
+## Parser Optimisation Notes
+
+The initial StAX parser implementation used an `ArrayList<String>` element stack with `stackContains()` checks to determine parsing context. This performed 7 linear scans per `END_ELEMENT` event. For Type C with ~20M end-element events, this produced ~140M `String.equals()` calls.
+
+**Fix:** Replaced the element stack with **boolean depth flags** (`inGrpHdr`, `inPmtInf`, `inCdtTrfTxInf`, etc.) that toggle O(1) on start/end element events.
+
+The streaming parse path reuses the same `VectorSchemaRoot` per table by calling `root.clear()` after each batch flush, keeping Arrow off-heap memory flat regardless of file size.
+
+## License
+
+This is a study/research project. Use at your own discretion.
+
+
+📊 See [Test Results & Benchmark Report](TEST_RESULTS.md) for detailed performance data and test outcomes.
+
+A study project that parses ISO 20022 **pain.001.001.09** (CustomerCreditTransferInitiation) XML files into **Apache Arrow** columnar in-memory tables using a streaming StAX parser — with no DOM, no JAXB, and no intermediate POJOs.
+
+The goal is to measure whether Apache Arrow's columnar format provides meaningful gains in **storage**, **memory**, and **analytical throughput** over raw XML for financial messaging workloads.
+
+## Tech Stack
+
+| Component    | Version                                           |
+| ------------ | ------------------------------------------------- |
+| Java         | 17+ (virtual thread support via reflection on 21+) |
+| Apache Arrow | 15.0.2 (`arrow-vector`, `arrow-memory-unsafe`)    |
 | DuckDB       | 1.1.3 (`duckdb_jdbc`) — in-process SQL engine     |
 | XML Parser   | StAX (`javax.xml.stream`) — streaming pull parser |
 | Build        | Maven 3.9.6                                       |

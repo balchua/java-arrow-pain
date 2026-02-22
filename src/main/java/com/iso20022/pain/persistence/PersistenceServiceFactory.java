@@ -1,7 +1,6 @@
 package com.iso20022.pain.persistence;
 
 import org.apache.arrow.vector.types.pojo.Schema;
-import software.amazon.awssdk.services.s3.S3Client;
 
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -51,8 +50,7 @@ public final class PersistenceServiceFactory {
             if (keyPrefix == null || keyPrefix.isBlank()) {
                 keyPrefix = "pain001";
             }
-            S3Client s3Client = S3Client.create();
-            return new S3PersistenceService(s3Client, bucket, keyPrefix, baseName, msg, rmt, tx);
+            return new S3PersistenceService(bucket, keyPrefix, baseName, msg, rmt, tx);
         }
 
         // local mode

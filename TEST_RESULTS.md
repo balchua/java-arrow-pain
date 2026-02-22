@@ -354,7 +354,52 @@ have required — an **~89% memory reduction**.
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
-### Key Observations — Before vs After (Streaming vs Batch-Accumulation)
+### Parse Time Comparison — Old (Batch Accumulation) vs New (Streaming)
+
+The old `doParse()` did nothing but fill Arrow buffers in memory — no I/O, no DuckDB work.
+The new `doParseStreaming()` runs **two extra sinks per 65,536-row batch** inside the parse loop:
+1. DuckDB Arrow C Data Interface live INSERT (`registerArrowStream` → `INSERT INTO … SELECT * FROM _tmp_…`)
+2. `ArrowStreamWriter.writeBatch()` to the IPC Stream file
+
+The table below compares the pure XML→Arrow parse time from the old implementation (measured in
+`ArrowFileLoadBenchmarkTest` under the legacy `doParse()` path) with the new total parse time
+(XML→Arrow + per-batch DuckDB INSERT + per-batch IPC write), as measured in `FullPipelineBenchmarkTest`.
+
+| Type | Description | Old Parse (ms) | New Parse (ms) | Penalty | Batches flushed | Overhead/batch |
+|---|---|---|---|---|---|---|
+| A | 1 PmtInf × 1,000,000 TxInf | ~7,000 | **8,480** | **+21%** | ~16 tx | ~93 ms |
+| B | 2 PmtInf × 500,000 TxInf | ~6,000 | **7,422** | **+24%** | ~16 tx | ~90 ms |
+| C | 1,000,000 PmtInf × 1 TxInf | ~12,000 | **20,603** | **+72%** | ~16 rmt + ~16 tx = **32** | ~270 ms |
+| D | 2 PmtInf × 100 TxInf | ~3 | **10** | +7 ms | 1 tx | <10 ms |
+| E | 2 PmtInf × 100 TxInf | ~3 | **9** | +6 ms | 1 tx | <10 ms |
+
+**Why Type C carries the largest penalty (+72%)**
+
+Type C has `1,000,000 PmtInf` blocks, so both the remittance and transaction tables fill at the same rate —
+each with ~16 batches of 65,536 rows. That produces **32 DuckDB live INSERT calls** compared to Types A/B
+which only drive the transaction table (~16 calls). Each DuckDB INSERT via the C Data Interface takes ~90–270 ms
+because DuckDB must parse the Arrow stream, allocate internal buffers, and execute the insert plan.
+
+The per-batch overhead is **not linear** with row count — it is dominated by the per-batch DuckDB planning
+cost. Larger batches amortise this cost better; the current BATCH_SIZE of 65,536 rows is the Arrow default.
+
+**Trade-off summary**
+
+| Dimension | Before | After | Winner |
+|---|---|---|---|
+| Arrow off-heap (Type A) | 348 MB (all batches live) | **24.5 MB** (1 batch live) | ✅ After (−93%) |
+| Arrow off-heap (Type C) | 562 MB | **38.1 MB** | ✅ After (−93%) |
+| Parse time (Type A/B) | ~6–7 s | ~7.4–8.5 s | ≈ Neutral (+21–24%) |
+| Parse time (Type C) | ~12 s | ~20.6 s | ⚠ After is slower (+72%) |
+| 10M row file (projected) | OOM (>8 GB off-heap) | ~150 MB off-heap | ✅ After (fits in 4 GB pod) |
+| Output fidelity | In-memory only | DuckDB + `.arrows` files | ✅ After |
+
+> The +72% parse penalty for Type C (1M PmtInf × 1 TxInf) is the cost of running 32 live DuckDB
+> INSERT operations inside the parse loop instead of 0. For production workloads, this is acceptable
+> because the alternative is OOM. If Type-C-shaped files are a hot path, DuckDB batch size can be
+> increased or the DuckDB INSERT can be made async (outside scope of this PR).
+
+### Memory Observations — Before vs After (Streaming vs Batch-Accumulation)
 
 | Metric | Before (batch accumulation) | After (streaming) | Reduction |
 |---|---|---|---|

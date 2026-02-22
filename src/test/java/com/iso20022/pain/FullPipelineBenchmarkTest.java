@@ -58,6 +58,7 @@ class FullPipelineBenchmarkTest {
             long writeMs,
             long offHeapAllocatedBytes,
             long offHeapPeakBytes,
+            long offHeapStreamingPeakBytes,
             long heapDeltaBytes,
             long txRows,
             boolean valid
@@ -115,6 +116,7 @@ class FullPipelineBenchmarkTest {
         long writeMs;
         long offHeapAllocated;
         long offHeapPeak;
+        long offHeapStreamingPeak;
         long txRows;
         long arrowBytes = 0;
         boolean validationPassed;
@@ -182,6 +184,7 @@ class FullPipelineBenchmarkTest {
 
             offHeapPeak = allocator.getPeakMemoryAllocation();
             benchmark.setOffHeapPeakBytes(offHeapPeak);
+            offHeapStreamingPeak = benchmark.getOffHeapStreamingPeakBytes();
         }
 
         benchmark.setHeapUsedAfterBytes(LoadBenchmark.captureHeapUsed());
@@ -196,32 +199,46 @@ class FullPipelineBenchmarkTest {
                 fileSizeBytes,
                 arrowBytes,
                 parseMs, duckdbMs, validateMs, writeMs,
-                offHeapAllocated, offHeapPeak,
+                offHeapAllocated, offHeapPeak, offHeapStreamingPeak,
                 heapDelta, txRows, validationPassed
         );
     }
 
     private static void printSummaryTable(List<TypeSummary> rows) {
         System.out.println();
-        System.out.println("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        System.out.println("║  Full Pipeline Benchmark Summary — XML→Arrow Parse → DuckDB Load → SQL Validate → Arrow IPC Write            ║");
-        System.out.println("╠═════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦════════════╣");
-        System.out.println("║  Type   ║ XML (MB) ║ Arr (MB) ║ Parse ms ║ Duck ms  ║  Val ms  ║ Write ms ║ OffH (MB)║ Heap ΔMB ║  Tx Rows   ║");
-        System.out.println("╠═════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬════════════╣");
+        System.out.println("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║  Full Pipeline Benchmark Summary — XML→Arrow Streaming Parse → DuckDB Live INSERT → SQL Validate → Arrow IPC Write          ║");
+        System.out.println("╠═════════╦══════════╦══════════╦══════════╦══════════╦══════════╦══════════╦═══════════╦═══════════╦══════════╦════════════╣");
+        System.out.println("║  Type   ║ XML (MB) ║ Arr (MB) ║ Parse ms ║  Val ms  ║ Write ms ║ HWM (MB) ║ Stream MB ║ Savings % ║ Heap ΔMB ║  Tx Rows   ║");
+        System.out.println("╠═════════╬══════════╬══════════╬══════════╬══════════╬══════════╬══════════╬═══════════╬═══════════╬══════════╬════════════╣");
         for (TypeSummary r : rows) {
-            System.out.printf("║  %-7s ║ %8.1f ║ %8.1f ║ %8s ║ %8s ║ %8s ║ %8s ║ %8.1f ║ %8.1f ║ %10s ║%n",
+            // Arrow file size is a proxy for what old batch-accumulation off-heap would have been
+            double arrowMb = r.arrowSizeBytes() / (1024.0 * 1024.0);
+            double hwmMb = r.offHeapPeakBytes() / (1024.0 * 1024.0);
+            double streamMb = r.offHeapStreamingPeakBytes() / (1024.0 * 1024.0);
+            // Savings only meaningful for files large enough to fill at least one batch
+            String savingsStr = (arrowMb >= 1.0)
+                    ? String.format("%7.1f%%", (1.0 - streamMb / arrowMb) * 100.0)
+                    : "      N/A";
+            System.out.printf("║  %-7s ║ %8.1f ║ %8.1f ║ %8s ║ %8s ║ %8s ║ %8.1f ║ %9.1f ║ %9s ║ %8.1f ║ %10s ║%n",
                     r.typeLabel(),
                     r.xmlSizeBytes() / (1024.0 * 1024.0),
-                    r.arrowSizeBytes() / (1024.0 * 1024.0),
+                    arrowMb,
                     String.format("%,d", r.parseMs()),
-                    String.format("%,d", r.duckdbMs()),
                     String.format("%,d", r.validateMs()),
                     String.format("%,d", r.writeMs()),
-                    r.offHeapPeakBytes() / (1024.0 * 1024.0),
+                    hwmMb,
+                    streamMb,
+                    savingsStr,
                     r.heapDeltaBytes() / (1024.0 * 1024.0),
                     String.format("%,d", r.txRows()));
         }
-        System.out.println("╚═════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩════════════╝");
+        System.out.println("╚═════════╩══════════╩══════════╩══════════╩══════════╩══════════╩══════════╩═══════════╩═══════════╩══════════╩════════════╝");
+        System.out.println();
+        System.out.println("  HWM (MB)   = Arrow allocator high-water mark (allocator lifetime peak)");
+        System.out.println("  Stream MB  = Peak Arrow off-heap sampled at each batch flush during parseStreaming()");
+        System.out.println("  Savings %  = (1 - Stream MB / Arr MB) × 100  [vs batch-accumulation proxy: Arrow IPC file size]");
+        System.out.println("  Write ms   = Time to flush/close IPC writers (actual write I/O is pipelined with parse)");
         System.out.println();
     }
 }

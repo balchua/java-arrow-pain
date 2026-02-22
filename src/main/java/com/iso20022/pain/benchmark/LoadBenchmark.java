@@ -111,6 +111,10 @@ public final class LoadBenchmark {
         this.offHeapLimitBytes = bytes;
     }
 
+    public long getOffHeapStreamingPeakBytes() {
+        return offHeapStreamingPeakBytes;
+    }
+
     /**
      * Called once per batch flush during streaming parse.
      * Updates {@code offHeapStreamingPeakBytes} if {@code currentBytes} is larger.

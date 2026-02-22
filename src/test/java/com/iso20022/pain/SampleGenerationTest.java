@@ -1,21 +1,28 @@
 package com.iso20022.pain;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
+import com.iso20022.pain.arrow.Pain001ArrowSchema;
 import com.iso20022.pain.dal.PaymentRepository;
 import com.iso20022.pain.dal.PaymentRepositoryImpl;
 import com.iso20022.pain.generator.TestFileGenerator;
 import com.iso20022.pain.generator.TestPainFileSpecs;
 import com.iso20022.pain.parser.PainParser;
 import com.iso20022.pain.parser.PainParserImpl;
+import com.iso20022.pain.parser.ParseStats;
+import com.iso20022.pain.parser.StreamingBatchConsumer;
+import com.iso20022.pain.persistence.LocalFilePersistenceService;
 import com.iso20022.pain.validation.ValidationContext;
 import com.iso20022.pain.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,34 +46,42 @@ class SampleGenerationTest {
 
     @Test
     @DisplayName("Type D: parse returns correct row counts (2 remittances, 200 transactions)")
-    void typeDParseRowCounts() throws Exception {
+    void typeDParseRowCounts(@TempDir Path tempDir) throws Exception {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             PainParser parser = new PainParserImpl();
-            try (ArrowBatchResult result = parser.parse(file, allocator)) {
-                assertEquals(2L, result.getRemittanceRowCount(),
-                        "Type D should have 2 remittance rows");
-                assertEquals(200L, result.getTransactionRowCount(),
-                        "Type D should have 200 transaction rows");
-            }
+            ParseStats stats = parser.parseStreaming(file, allocator, (t, r) -> {});
+            assertEquals(2L, stats.remittanceRows(),
+                    "Type D should have 2 remittance rows");
+            assertEquals(200L, stats.transactionRows(),
+                    "Type D should have 200 transaction rows");
         }
     }
 
     @Test
     @DisplayName("Type D: validation passes with 0 errors")
-    void typeDValidationPasses() throws Exception {
+    void typeDValidationPasses(@TempDir Path tempDir) throws Exception {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
+        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
+        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
+        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
+
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            PainParser parser = new PainParserImpl();
-            try (ArrowBatchResult result = parser.parse(file, allocator)) {
-                try (PaymentRepository repository = new PaymentRepositoryImpl(result, allocator)) {
-                    ValidationContext context = ValidationPipeline.standard().execute(repository);
-                    assertFalse(context.hasErrors(),
-                            "Type D (valid file) should pass validation with 0 errors, but got: "
-                                    + context.getErrors());
-                }
+            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            try (LocalFilePersistenceService persistence =
+                    new LocalFilePersistenceService(tempDir, "typed", msgSchema, rmtSchema, txSchema)) {
+                StreamingBatchConsumer consumer =
+                        new StreamingBatchConsumer(conn, persistence, allocator);
+                new PainParserImpl().parseStreaming(file, allocator, consumer);
+                persistence.finish();
+            }
+            try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
+                ValidationContext context = ValidationPipeline.standard().execute(repository);
+                assertFalse(context.hasErrors(),
+                        "Type D (valid file) should pass validation with 0 errors, but got: "
+                                + context.getErrors());
             }
         }
     }
@@ -81,40 +96,49 @@ class SampleGenerationTest {
 
     @Test
     @DisplayName("Type E: parse returns correct row counts (2 remittances, 200 transactions)")
-    void typeEParseRowCounts() throws Exception {
+    void typeEParseRowCounts(@TempDir Path tempDir) throws Exception {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_E);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             PainParser parser = new PainParserImpl();
-            try (ArrowBatchResult result = parser.parse(file, allocator)) {
-                assertEquals(2L, result.getRemittanceRowCount(),
-                        "Type E should have 2 remittance rows");
-                assertEquals(200L, result.getTransactionRowCount(),
-                        "Type E should have 200 transaction rows");
-            }
+            ParseStats stats = parser.parseStreaming(file, allocator, (t, r) -> {});
+            assertEquals(2L, stats.remittanceRows(),
+                    "Type E should have 2 remittance rows");
+            assertEquals(200L, stats.transactionRows(),
+                    "Type E should have 200 transaction rows");
         }
     }
 
     @Test
     @DisplayName("Type E: validation reports at least 1 CtrlSum error")
-    void typeEValidationReportsCtrlSumError() throws Exception {
+    void typeEValidationReportsCtrlSumError(@TempDir Path tempDir) throws Exception {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_E);
 
+        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
+        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
+        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
+
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            PainParser parser = new PainParserImpl();
-            try (ArrowBatchResult result = parser.parse(file, allocator)) {
-                try (PaymentRepository repository = new PaymentRepositoryImpl(result, allocator)) {
-                    ValidationContext context = ValidationPipeline.standard().execute(repository);
-                    assertTrue(context.hasErrors(),
-                            "Type E (invalid CtrlSum) should fail validation");
-                    long ctrlSumErrors = context.getErrors().stream()
-                            .filter(e -> e.validator().equals("ControlSumValidator"))
-                            .count();
-                    assertTrue(ctrlSumErrors >= 1,
-                            "Type E should have at least 1 CtrlSum error, but got: "
-                                    + context.getErrors());
-                }
+            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            try (LocalFilePersistenceService persistence =
+                    new LocalFilePersistenceService(tempDir, "typee", msgSchema, rmtSchema, txSchema)) {
+                StreamingBatchConsumer consumer =
+                        new StreamingBatchConsumer(conn, persistence, allocator);
+                new PainParserImpl().parseStreaming(file, allocator, consumer);
+                persistence.finish();
+            }
+            try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
+                ValidationContext context = ValidationPipeline.standard().execute(repository);
+                assertTrue(context.hasErrors(),
+                        "Type E (invalid CtrlSum) should fail validation");
+                long ctrlSumErrors = context.getErrors().stream()
+                        .filter(e -> e.validator().equals("ControlSumValidator"))
+                        .count();
+                assertTrue(ctrlSumErrors >= 1,
+                        "Type E should have at least 1 CtrlSum error, but got: "
+                                + context.getErrors());
             }
         }
     }
 }
+

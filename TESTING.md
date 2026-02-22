@@ -27,10 +27,22 @@ Results are saved to `test-results/test_run_YYYYMMDD_HHMMSS.log`
 The test suite:
 1. Compiles the project (`mvn clean compile`)
 2. Generates test XML files (Type A, B, C)
-3. Parses XML into Arrow format
+3. Parses XML into Arrow format using streaming pipeline
 4. Runs validation pipeline with all validators
-5. Exports Arrow IPC files
+5. Streams Arrow IPC batches via PersistenceService (local or S3)
 6. Captures complete benchmark results
+
+### Configuration
+
+See the [Configuration](README.md#configuration) section in README.md for the environment variables
+that control the persistence mode and output directory:
+
+| Env var | Default | Description |
+|---|---|---|
+| `PAIN_PERSISTENCE_MODE` | `local` | `local` or `s3` |
+| `PAIN_LOCAL_OUTPUT_DIR` | `src/main/resources/output` | Local output directory for Arrow IPC Stream files |
+| `PAIN_S3_BUCKET` | _(required for s3)_ | Target S3 bucket name |
+| `PAIN_S3_KEY_PREFIX` | `pain001` | S3 key prefix (folder) |
 
 ### Test Files
 

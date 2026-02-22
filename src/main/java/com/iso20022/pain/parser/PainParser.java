@@ -1,6 +1,5 @@
 package com.iso20022.pain.parser;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
 import org.apache.arrow.memory.BufferAllocator;
 import javax.xml.stream.XMLStreamException;
 import java.io.IOException;
@@ -11,14 +10,16 @@ import java.nio.file.Path;
  */
 public interface PainParser {
     /**
-     * Parses the given XML file into three Arrow tables (message, remittance, transaction).
+     * Streaming parse — invokes {@code consumer} once per finalized batch.
+     * Arrow RAM is cleared after each consumer callback; memory stays flat.
      *
      * @param xmlFile   path to an existing pain.001.001.09 XML file
      * @param allocator Arrow buffer allocator for off-heap memory
-     * @return parsed Arrow batch result — caller must close() when done
+     * @param consumer  callback invoked once per finalized batch
+     * @return lightweight parse statistics
      * @throws IOException        on I/O failure
      * @throws XMLStreamException on XML parse failure
      */
-    ArrowBatchResult parse(Path xmlFile, BufferAllocator allocator)
+    ParseStats parseStreaming(Path xmlFile, BufferAllocator allocator, BatchConsumer consumer)
             throws IOException, XMLStreamException;
 }

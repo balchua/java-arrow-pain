@@ -32,6 +32,12 @@ public final class LoadBenchmark {
     private long offHeapPeakBytes;
     private long offHeapLimitBytes;
 
+    // ── Streaming Arrow peak (explicit per-batch sample) ─────────────────────
+    private long offHeapStreamingPeakBytes;
+
+    // ── DuckDB memory budget (proxy for pod impact) ───────────────────────────
+    private long duckDbMemoryLimitBytes;
+
     // ── Validation ──────────────────────────────────────────────────────────
     private boolean validationPassed;
     private long validationRemittances;
@@ -103,6 +109,52 @@ public final class LoadBenchmark {
 
     public void setOffHeapLimitBytes(long bytes) {
         this.offHeapLimitBytes = bytes;
+    }
+
+    public long getOffHeapStreamingPeakBytes() {
+        return offHeapStreamingPeakBytes;
+    }
+
+    /**
+     * Called once per batch flush during streaming parse.
+     * Updates {@code offHeapStreamingPeakBytes} if {@code currentBytes} is larger.
+     * Thread-safe (called from the parse loop, not concurrently, but defensive).
+     */
+    public synchronized void sampleOffHeap(long currentBytes) {
+        if (currentBytes > offHeapStreamingPeakBytes) {
+            offHeapStreamingPeakBytes = currentBytes;
+        }
+    }
+
+    /**
+     * Sets the DuckDB memory limit in bytes (parsed from the SET memory_limit string).
+     * Used as a proxy for DuckDB's pod footprint contribution.
+     */
+    public void setDuckDbMemoryLimitBytes(long bytes) {
+        this.duckDbMemoryLimitBytes = bytes;
+    }
+
+    /**
+     * Parses DuckDB's SET memory_limit value (e.g. "1GB", "512MB", "2048MB") to bytes.
+     * Returns 0 if the string cannot be parsed.
+     * Supported suffixes (case-insensitive): KB, MB, GB, TB.
+     */
+    public static long parseDuckDbMemoryLimit(String limitStr) {
+        if (limitStr == null || limitStr.isBlank()) return 0L;
+        String s = limitStr.trim().toUpperCase();
+        try {
+            if (s.endsWith("TB")) return (long) (Double.parseDouble(s.replace("TB", "").trim())
+                    * 1024L * 1024L * 1024L * 1024L);
+            if (s.endsWith("GB")) return (long) (Double.parseDouble(s.replace("GB", "").trim())
+                    * 1024L * 1024L * 1024L);
+            if (s.endsWith("MB")) return (long) (Double.parseDouble(s.replace("MB", "").trim())
+                    * 1024L * 1024L);
+            if (s.endsWith("KB")) return (long) (Double.parseDouble(s.replace("KB", "").trim())
+                    * 1024L);
+        } catch (NumberFormatException e) {
+            // fall through to return 0
+        }
+        return 0L;
     }
 
     /**
@@ -229,14 +281,32 @@ public final class LoadBenchmark {
         sb.append("║  ──────────────────────────────────────────────────────────║\n");
         sb.append(String.format("║  Off-heap alloc'd : %,15d bytes (%,.1f MB)       ║%n",
                 offHeapAllocatedBytes, offHeapAllocatedBytes / (1024.0 * 1024.0)));
-        sb.append(String.format("║  Off-heap peak    : %,15d bytes (%,.1f MB)       ║%n",
+        sb.append(String.format(
+                "║  Off-heap peak    : %,15d bytes (%,.1f MB)  [Arrow allocator lifetime HWM]  ║%n",
                 offHeapPeakBytes, offHeapPeakBytes / (1024.0 * 1024.0)));
+        String streamPeakNote = offHeapStreamingPeakBytes == 0
+                ? "(not sampled — legacy mode)"
+                : String.format("%,.1f MB", offHeapStreamingPeakBytes / (1024.0 * 1024.0));
+        sb.append(String.format(
+                "║  Off-heap stream  : %,15d bytes (%s)  [max sample during parse loop]  ║%n",
+                offHeapStreamingPeakBytes, streamPeakNote));
         sb.append(String.format("║  Off-heap limit   : %,15d bytes (%,.1f MB)       ║%n",
                 offHeapLimitBytes, offHeapLimitBytes / (1024.0 * 1024.0)));
         sb.append("║  ──────────────────────────────────────────────────────────║\n");
-        long combinedPeak = heapUsedAfterBytes + offHeapPeakBytes;
-        sb.append(String.format("║  Combined peak    : %,15d bytes (%,.1f MB)       ║%n",
-                combinedPeak, combinedPeak / (1024.0 * 1024.0)));
+        String duckDbNote = duckDbMemoryLimitBytes == 0 ? "(not set)" :
+                String.format("%,.1f MB", duckDbMemoryLimitBytes / (1024.0 * 1024.0));
+        sb.append(String.format(
+                "║  DuckDB limit     : %,15d bytes (%s)  [estimate — SET memory_limit]   ║%n",
+                duckDbMemoryLimitBytes, duckDbNote));
+        sb.append("║  ──────────────────────────────────────────────────────────║\n");
+        long effectiveArrowPeak = Math.max(offHeapPeakBytes, offHeapStreamingPeakBytes);
+        long totalPodImpact = heapUsedAfterBytes + effectiveArrowPeak + duckDbMemoryLimitBytes;
+        sb.append(String.format(
+                "║  Effective Arrow  : %,15d bytes (%,.1f MB)  [max(offHeapPeak, streamPeak)]  ║%n",
+                effectiveArrowPeak, effectiveArrowPeak / (1024.0 * 1024.0)));
+        sb.append(String.format(
+                "║  Total Pod Impact : %,15d bytes (%,.1f MB)  [Heap + Arrow + DuckDB *est*]   ║%n",
+                totalPodImpact, totalPodImpact / (1024.0 * 1024.0)));
 
         sb.append("╚══════════════════════════════════════════════════════════════╝\n");
         return sb.toString();

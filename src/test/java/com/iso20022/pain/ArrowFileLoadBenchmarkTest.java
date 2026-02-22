@@ -1,40 +1,45 @@
 package com.iso20022.pain;
 
 import com.iso20022.pain.arrow.ArrowBatchResult;
-import com.iso20022.pain.arrow.ArrowFileExporter;
+import com.iso20022.pain.arrow.Pain001ArrowSchema;
 import com.iso20022.pain.dal.PaymentRepository;
 import com.iso20022.pain.dal.PaymentRepositoryImpl;
 import com.iso20022.pain.generator.PainFileSpec;
 import com.iso20022.pain.generator.TestFileGenerator;
 import com.iso20022.pain.generator.TestPainFileSpecs;
+import com.iso20022.pain.parser.BatchConsumer;
 import com.iso20022.pain.parser.PainParser;
 import com.iso20022.pain.parser.PainParserImpl;
+import com.iso20022.pain.parser.StreamingBatchConsumer;
+import com.iso20022.pain.persistence.LocalFilePersistenceService;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.ipc.ArrowFileReader;
+import org.apache.arrow.vector.ipc.ArrowStreamReader;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.FileInputStream;
-import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Arrow IPC to DuckDB load benchmark test - all file types A through E.
+ * Arrow IPC Stream to DuckDB load benchmark test - all file types A through E.
  *
  * <p>For each type, this test:</p>
  * <ol>
  *   <li>Generates the XML if absent</li>
- *   <li>Parses XML to Arrow and exports the three Arrow IPC files
- *       (message, remittance, transaction)</li>
- *   <li>Simulates a downstream consumer: reads the .arrow files back from disk
+ *   <li>Parses XML to Arrow using streaming pipeline and exports the three Arrow IPC Stream files
+ *       (message, remittance, transaction) via {@link LocalFilePersistenceService}</li>
+ *   <li>Simulates a downstream consumer: reads the .arrows files back from disk
  *       and loads them directly into a fresh DuckDB in-process database</li>
  *   <li>Records per-table file sizes and DuckDB load time</li>
  * </ol>
@@ -63,7 +68,7 @@ class ArrowFileLoadBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Arrow IPC to DuckDB load benchmark - all types A through E")
+    @DisplayName("Arrow IPC Stream to DuckDB load benchmark - all types A through E")
     void arrowIpcLoadBenchmarkAllTypes() throws Exception {
         List<BenchmarkResult> results = new ArrayList<>();
 
@@ -97,35 +102,46 @@ class ArrowFileLoadBenchmarkTest {
         // Step 1: Generate XML if absent
         Path xmlFile = TestFileGenerator.generateIfAbsent(spec);
 
-        // Step 2: Parse XML to Arrow and export three Arrow IPC files
+        // Step 2: Parse XML using streaming pipeline and export three Arrow IPC Stream files
         Files.createDirectories(OUTPUT_DIR);
+        String base = spec.fileName().replaceAll("\\.[xX][mM][lL]$", "");
+
+        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
+        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
+        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
+
         try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
-            PainParser parser = new PainParserImpl();
-            try (ArrowBatchResult result = parser.parse(xmlFile, allocator)) {
-                ArrowFileExporter.export(result, allocator, OUTPUT_DIR,
-                        xmlFile.getFileName().toString());
+            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("SET memory_limit='1GB'");
             }
+            LocalFilePersistenceService persistence = new LocalFilePersistenceService(
+                    OUTPUT_DIR, base, msgSchema, rmtSchema, txSchema);
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, persistence, allocator);
+            PainParser parser = new PainParserImpl();
+            parser.parseStreaming(xmlFile, allocator, consumer);
+            persistence.finish();
+            conn.close();
         }
 
-        // Step 3: Resolve the three exported Arrow IPC files
-        String base   = spec.fileName().replaceAll("\\.[xX][mM][lL]$", "");
-        Path msgFile  = OUTPUT_DIR.resolve(base + "_message.arrow");
-        Path rmtFile  = OUTPUT_DIR.resolve(base + "_remittance.arrow");
-        Path txFile   = OUTPUT_DIR.resolve(base + "_transaction.arrow");
+        // Step 3: Resolve the three exported Arrow IPC Stream files
+        Path msgFile  = OUTPUT_DIR.resolve(base + "_message.arrows");
+        Path rmtFile  = OUTPUT_DIR.resolve(base + "_remittance.arrows");
+        Path txFile   = OUTPUT_DIR.resolve(base + "_transaction.arrows");
 
         long msgBytes = Files.size(msgFile);
         long rmtBytes = Files.size(rmtFile);
         long txBytes  = Files.size(txFile);
 
-        // Step 4: Simulate downstream consumer - read Arrow files then load into DuckDB
+        // Step 4: Simulate downstream consumer - read .arrows files then load into DuckDB
         long remittanceRows;
         long transactionRows;
         long loadTimeMs;
 
         try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
-            VectorSchemaRoot           msgRoot    = readArrowFile(msgFile, allocator);
-            List<VectorSchemaRoot> rmtBatches = readArrowFileBatches(rmtFile, allocator);
-            List<VectorSchemaRoot> txBatches  = readArrowFileBatches(txFile, allocator);
+            VectorSchemaRoot           msgRoot    = readArrowStreamFile(msgFile, allocator);
+            List<VectorSchemaRoot> rmtBatches = readArrowStreamFileBatches(rmtFile, allocator);
+            List<VectorSchemaRoot> txBatches  = readArrowStreamFileBatches(txFile, allocator);
 
             ArrowBatchResult reconstructed =
                     new ArrowBatchResult(msgRoot, rmtBatches, txBatches);
@@ -144,14 +160,13 @@ class ArrowFileLoadBenchmarkTest {
     }
 
     // -------------------------------------------------------------------------
-    // Arrow file readers
+    // Arrow Stream file readers
     // -------------------------------------------------------------------------
 
-    private static VectorSchemaRoot readArrowFile(Path arrowFile, BufferAllocator allocator)
+    private static VectorSchemaRoot readArrowStreamFile(Path arrowFile, BufferAllocator allocator)
             throws Exception {
         try (FileInputStream fis = new FileInputStream(arrowFile.toFile());
-             FileChannel channel = fis.getChannel();
-             ArrowFileReader reader = new ArrowFileReader(channel, allocator)) {
+             ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
 
             reader.loadNextBatch();
             VectorSchemaRoot root = reader.getVectorSchemaRoot();
@@ -166,15 +181,15 @@ class ArrowFileLoadBenchmarkTest {
         }
     }
 
-    private static List<VectorSchemaRoot> readArrowFileBatches(Path arrowFile,
+    private static List<VectorSchemaRoot> readArrowStreamFileBatches(Path arrowFile,
             BufferAllocator allocator) throws Exception {
         List<VectorSchemaRoot> batches = new ArrayList<>();
         try (FileInputStream fis = new FileInputStream(arrowFile.toFile());
-             FileChannel channel = fis.getChannel();
-             ArrowFileReader reader = new ArrowFileReader(channel, allocator)) {
+             ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
 
             while (reader.loadNextBatch()) {
                 VectorSchemaRoot root = reader.getVectorSchemaRoot();
+                if (root.getRowCount() == 0) continue;
                 VectorSchemaRoot copy = VectorSchemaRoot.create(root.getSchema(), allocator);
                 copy.allocateNew();
                 for (int i = 0; i < root.getFieldVectors().size(); i++) {
@@ -197,7 +212,7 @@ class ArrowFileLoadBenchmarkTest {
             "╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦══════════════╦═════════════╣";
         System.out.println();
         System.out.println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        System.out.println("║           Arrow IPC -> DuckDB Load Benchmark - All Types (Downstream Consumer Simulation)               ║");
+        System.out.println("║           Arrow IPC Stream -> DuckDB Load Benchmark - All Types (Downstream Consumer Simulation)         ║");
         System.out.println(LINE.replace('╠', '╠').replace('╣', '╣'));
         System.out.println("║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║  Rows/sec    ║  Tx Rows    ║");
         System.out.println(LINE.replace('╦', '╬'));
@@ -227,3 +242,4 @@ class ArrowFileLoadBenchmarkTest {
         return String.format("%,d", bytes / 1024);
     }
 }
+

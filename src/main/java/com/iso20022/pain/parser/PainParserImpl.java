@@ -1,6 +1,5 @@
 package com.iso20022.pain.parser;
 
-import com.iso20022.pain.arrow.ArrowBatchResult;
 import com.iso20022.pain.arrow.Pain001ArrowSchema;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.DateDayVector;
@@ -24,8 +23,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * StAX-based implementation of {@link PainParser} for ISO 20022 pain.001.001.09 XML files.
@@ -35,8 +32,8 @@ import java.util.List;
  * </p>
  * <ol>
  * <li><b>Message</b> — one row per GrpHdr (GroupHeader85)</li>
- * <li><b>Remittance</b> — one row per PmtInf (PaymentInstruction30), batched</li>
- * <li><b>Transaction</b> — one row per CdtTrfTxInf (CreditTransferTransaction34), batched</li>
+ * <li><b>Remittance</b> — one row per PmtInf (PaymentInstruction30), streamed per batch</li>
+ * <li><b>Transaction</b> — one row per CdtTrfTxInf (CreditTransferTransaction34), streamed per batch</li>
  * </ol>
  */
 public final class PainParserImpl implements PainParser {
@@ -49,17 +46,12 @@ public final class PainParserImpl implements PainParser {
     public PainParserImpl() {}
 
     /**
-     * Parses a pain.001.001.09 XML file into three Arrow tables.
-     *
-     * @param xmlFile   path to the XML file
-     * @param allocator Arrow buffer allocator for off-heap memory
-     * @return an {@link ArrowBatchResult} containing message, remittance, and transaction tables
-     * @throws IOException        if the file cannot be read
-     * @throws XMLStreamException if XML parsing fails
+     * Streaming parse — invokes {@code consumer} once per finalized batch.
+     * Arrow RAM is cleared after each consumer callback; memory stays flat.
      */
     @Override
-    public ArrowBatchResult parse(Path xmlFile, BufferAllocator allocator)
-            throws IOException, XMLStreamException {
+    public ParseStats parseStreaming(Path xmlFile, BufferAllocator allocator,
+            BatchConsumer consumer) throws IOException, XMLStreamException {
         XMLInputFactory factory = XMLInputFactory.newInstance();
         factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
@@ -69,15 +61,15 @@ public final class PainParserImpl implements PainParser {
 
             XMLStreamReader reader = factory.createXMLStreamReader(fis, "UTF-8");
             try {
-                return doParse(reader, allocator);
+                return doParseStreaming(reader, allocator, consumer);
             } finally {
                 reader.close();
             }
         }
     }
 
-    private ArrowBatchResult doParse(XMLStreamReader reader, BufferAllocator allocator)
-            throws XMLStreamException {
+    private ParseStats doParseStreaming(XMLStreamReader reader, BufferAllocator allocator,
+            BatchConsumer consumer) throws XMLStreamException, IOException {
 
         Schema messageSchema = Pain001ArrowSchema.createMessageSchema();
         Schema remittanceSchema = Pain001ArrowSchema.createRemittanceSchema();
@@ -88,14 +80,12 @@ public final class PainParserImpl implements PainParser {
         msgRoot.allocateNew();
         int msgRow = 0;
 
-        // ── Remittance table (batched) ──────────────────────────────────────
-        List<VectorSchemaRoot> rmtBatches = new ArrayList<>();
+        // ── Remittance table (streaming: reuse same root) ───────────────────
         VectorSchemaRoot rmtRoot = VectorSchemaRoot.create(remittanceSchema, allocator);
         rmtRoot.allocateNew();
         int rmtRow = 0;
 
-        // ── Transaction table (batched) ─────────────────────────────────────
-        List<VectorSchemaRoot> txBatches = new ArrayList<>();
+        // ── Transaction table (streaming: reuse same root) ──────────────────
         VectorSchemaRoot txRoot = VectorSchemaRoot.create(transactionSchema, allocator);
         txRoot.allocateNew();
         int txRow = 0;
@@ -145,6 +135,7 @@ public final class PainParserImpl implements PainParser {
 
         long totalTx = 0;
         long totalRmt = 0;
+        long totalMsg = 0;
 
         while (reader.hasNext()) {
             int event = reader.next();
@@ -230,6 +221,7 @@ public final class PainParserImpl implements PainParser {
                             setDecimal(msgRoot, Pain001ArrowSchema.MSG_CTRL_SUM, msgRow, grpCtrlSum);
                             setVarChar(msgRoot, Pain001ArrowSchema.MSG_INITG_PTY_NM, msgRow, grpInitgPtyNm);
                             msgRow++;
+                            totalMsg++;
                             inGrpHdr = false;
                         }
 
@@ -310,8 +302,8 @@ public final class PainParserImpl implements PainParser {
 
                             if (rmtRow >= BATCH_SIZE) {
                                 rmtRoot.setRowCount(rmtRow);
-                                rmtBatches.add(rmtRoot);
-                                rmtRoot = VectorSchemaRoot.create(remittanceSchema, allocator);
+                                consumer.accept(BatchConsumer.TableType.REMITTANCE, rmtRoot);
+                                rmtRoot.clear();
                                 rmtRoot.allocateNew();
                                 rmtRow = 0;
                             }
@@ -385,9 +377,9 @@ public final class PainParserImpl implements PainParser {
 
                             if (txRow >= BATCH_SIZE) {
                                 txRoot.setRowCount(txRow);
-                                txBatches.add(txRoot);
+                                consumer.accept(BatchConsumer.TableType.TRANSACTION, txRoot);
                                 LOG.debug("Flushed transaction batch ({} total tx)", totalTx);
-                                txRoot = VectorSchemaRoot.create(transactionSchema, allocator);
+                                txRoot.clear();
                                 txRoot.allocateNew();
                                 txRow = 0;
                             }
@@ -402,27 +394,34 @@ public final class PainParserImpl implements PainParser {
             }
         }
 
-        // ── Flush remaining partial batches ─────────────────────────────────
-        msgRoot.setRowCount(msgRow);
+        // ── Flush message batch ─────────────────────────────────────────────
+        if (msgRow > 0) {
+            msgRoot.setRowCount(msgRow);
+            consumer.accept(BatchConsumer.TableType.MESSAGE, msgRoot);
+            msgRoot.clear();
+        }
+        msgRoot.close();
 
+        // ── Flush remaining partial remittance batch ────────────────────────
         if (rmtRow > 0) {
             rmtRoot.setRowCount(rmtRow);
-            rmtBatches.add(rmtRoot);
-        } else {
-            rmtRoot.close();
+            consumer.accept(BatchConsumer.TableType.REMITTANCE, rmtRoot);
+            rmtRoot.clear();
         }
+        rmtRoot.close();
 
+        // ── Flush remaining partial transaction batch ───────────────────────
         if (txRow > 0) {
             txRoot.setRowCount(txRow);
-            txBatches.add(txRoot);
-        } else {
-            txRoot.close();
+            consumer.accept(BatchConsumer.TableType.TRANSACTION, txRoot);
+            txRoot.clear();
         }
+        txRoot.close();
 
-        LOG.info("Parsing complete: {} messages, {} remittances, {} transactions",
-                msgRow, totalRmt, totalTx);
+        LOG.info("Streaming parse complete: {} messages, {} remittances, {} transactions",
+                totalMsg, totalRmt, totalTx);
 
-        return new ArrowBatchResult(msgRoot, rmtBatches, txBatches);
+        return new ParseStats(totalMsg, totalRmt, totalTx);
     }
 
     private static void setVarChar(VectorSchemaRoot root, String fieldName,

@@ -59,6 +59,18 @@ public final class ArrowIpc {
 
     private ArrowIpc() {}
 
+    private static final java.util.regex.Pattern SAFE_IDENTIFIER =
+            java.util.regex.Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
+    /** Validates that {@code name} is a safe SQL identifier (letters, digits, underscores). */
+    private static String requireSafeIdentifier(String name) {
+        if (name == null || !SAFE_IDENTIFIER.matcher(name).matches()) {
+            throw new IllegalArgumentException(
+                    "Unsafe SQL identifier: '" + name + "'. Only [A-Za-z_][A-Za-z0-9_]* allowed.");
+        }
+        return name;
+    }
+
     // ── Export ────────────────────────────────────────────────────────────────
 
     /**
@@ -81,7 +93,7 @@ public final class ArrowIpc {
                               Path outputFile,
                               BufferAllocator allocator) throws Exception {
         try (var stmt = conn.createStatement();
-             var rs   = stmt.executeQuery("SELECT * FROM " + tableName)) {
+             var rs   = stmt.executeQuery("SELECT * FROM " + requireSafeIdentifier(tableName))) {
 
             DuckDBResultSet drs = (DuckDBResultSet) rs;
 
@@ -123,7 +135,7 @@ public final class ArrowIpc {
                             String tableName,
                             Path arrowFile,
                             BufferAllocator allocator) throws Exception {
-        String tmpName = "__arrow_" + tableName + "_" + TMP_SEQ.getAndIncrement();
+        String tmpName = "__arrow_" + requireSafeIdentifier(tableName) + "_" + TMP_SEQ.getAndIncrement();
 
         try (var fis    = new FileInputStream(arrowFile.toFile());
              var reader = new ArrowStreamReader(fis, allocator);
@@ -137,7 +149,7 @@ public final class ArrowIpc {
 
             // Materialise in one scan — DuckDB calls get_next() batch by batch
             try (var stmt = conn.createStatement()) {
-                stmt.execute("CREATE TABLE " + tableName
+                stmt.execute("CREATE TABLE " + requireSafeIdentifier(tableName)
                         + " AS SELECT * FROM " + tmpName);
             }
         }

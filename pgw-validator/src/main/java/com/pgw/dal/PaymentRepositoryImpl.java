@@ -25,7 +25,7 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
     /**
      * Wraps a pre-populated DuckDB connection. No data loading occurs.
      * Used by the streaming pipeline (tables populated live during parsing)
-     * and by the benchmark tests (tables loaded via {@code read_arrow()}).
+     * and by the benchmark tests (tables loaded via {@link com.pgw.ArrowIpc#load}).
      *
      * @param conn a DuckDB connection whose tables are already populated
      */

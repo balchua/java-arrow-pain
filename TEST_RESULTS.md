@@ -2,13 +2,11 @@
 
 Multi-module build (`pgw-ingestor` + `pgw-validator`), package root `com.pgw`.
 
-**Environment:** Java 25 (Temurin 25.0.2), Maven 3.9, `-Xmx2g`,
+**Environment:** Java 25 (Temurin 25.0.2), Maven 3.9, `-Xmx4g`,
 `--add-opens=java.base/java.nio=ALL-UNNAMED`
 
-**Prerequisite:** DuckDB Arrow community extension must be installed once before running:
-```bash
-bash install-arrow-extension.sh
-```
+**No extensions required.** Arrow export and import use DuckDB's built-in C Data Interface
+(`DuckDBResultSet.arrowExportStream` / `registerArrowStream`) — works in air-gapped environments.
 
 ---
 
@@ -17,50 +15,62 @@ bash install-arrow-extension.sh
 ```
 XML → StAX parse → StreamingBatchConsumer → DuckDB (single sink)
                                                   ↓
-                                    COPY (SELECT * FROM table)
-                                      TO 'file.arrow' (FORMAT arrow)
+                                    ArrowIpc.export()
+                                    DuckDBResultSet.arrowExportStream(allocator, 65536)
+                                    [C Data Interface — no extension]
                                                   ↓
                                          *.arrow files on disk
-                                                  ↓  [read_arrow()]
+                                                  ↓  [ArrowIpc.load()]
+                                    ArrowStreamReader → registerArrowStream
+                                    CREATE TABLE AS SELECT * FROM stream
+                                                  ↓
                                     Validator in-process DuckDB
                                                   ↓
                                     SQL validation pipeline
 ```
 
 `StreamingBatchConsumer` is the only sink — it inserts into DuckDB via Arrow C Data
-Interface. After parsing, `App.java` (or the benchmark tests) call DuckDB's native
-`COPY TO (FORMAT arrow)` to export three Arrow files.
+Interface. After parsing, `ArrowIpc.export()` (or `App.java`) uses DuckDB's built-in
+`DuckDBResultSet.arrowExportStream` to export three Arrow IPC stream files without any extension.
 
 ---
 
 ## How to Run Tests
 
 ```bash
-# 1. Install the DuckDB Arrow extension (once, requires internet)
-bash install-arrow-extension.sh
+# No extension installation needed — ArrowIpc uses the C Data Interface built into DuckDB JDBC.
 
-# 2. Build
+# 1. Build
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn clean package -DskipTests
 
-# 3. Fast tests (< 30 s) — Types D + E only, table output in console
+# 2. Fast tests (< 30 s) — Types D + E only, table output in console
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-  mvn test -pl pgw-ingestor,pgw-validator \
-  -Dtest="ParsePipelineTest,StreamingPipelineTest,MemoryLeakVerificationTest,ValidationTest"
+  mvn test -pl pgw-ingestor \
+  -Dtest="ParsePipelineTest,StreamingPipelineTest,MemoryLeakVerificationTest"
 
-# 4. Arrow→DuckDB load benchmark (all 5 types, table in console)
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+# Also run the domain validation correctness tests
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-validator --also-make \
+  -Dtest="ValidationTest"
+
+# 3. Arrow→DuckDB load benchmark (all 5 types, table in console)
+#    First run generates large XML files (Types A–C: ~516–888 MB); cached on subsequent runs.
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-validator --also-make \
   -Dtest="ArrowFileLoadBenchmarkTest"
 
-# 5. Validation benchmark (all 5 types, table in console)
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+# 4. Validation benchmark (all 5 types, DuckDB load + SQL validation, table in console)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-validator --also-make \
   -Dtest="ValidationBenchmarkTest"
 
-# 6. Full suite
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+# 5. Full suite (all 15 tests, ~2 min on first run due to large XML generation)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor,pgw-validator
+
+# 6. Standardized before/after comparison (saves timestamped log to test-results/)
+./run_validation_tests.sh
 ```
 
 > Both module POMs set `redirectTestOutputToFile=false` so the benchmark tables
@@ -72,47 +82,39 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
 
 | Module | Test Class | Type | Tests |
 |--------|-----------|------|------:|
-| `pgw-ingestor` | `ParsePipelineTest` | Correctness | 5 |
-| `pgw-ingestor` | `StreamingPipelineTest` | Correctness + Arrow export | 4 |
+| `pgw-ingestor` | `ParsePipelineTest` | Correctness | 4 |
+| `pgw-ingestor` | `StreamingPipelineTest` | Correctness + ArrowIpc export/load | 4 |
 | `pgw-ingestor` | `MemoryLeakVerificationTest` | Memory safety | 3 |
 | `pgw-validator` | `ValidationTest` | Domain validation correctness | 2 |
 | `pgw-validator` | `ArrowFileLoadBenchmarkTest` | Performance | 1 |
 | `pgw-validator` | `ValidationBenchmarkTest` | Performance | 1 |
-| **Total** | | | **16** |
-
-> `ParsePipelineTest` and `MemoryLeakVerificationTest` do **not** use DuckDB Arrow export —
-> they work with the StAX parser and Arrow C Data Interface only, so they run without
-> the arrow extension.
->
-> `StreamingPipelineTest`, `ArrowFileLoadBenchmarkTest`, `ValidationBenchmarkTest`, and
-> `ValidationTest` all call `DuckDbFactory.newConnection()` which loads the arrow extension,
-> so the extension must be installed.
+| **Total** | | | **15** |
 
 ---
 
 ## XML → DuckDB Ingestion + Arrow Export — Types A–E
 
 **Path:** XML → StAX streaming parse → `StreamingBatchConsumer` → DuckDB →
-`COPY TO (FORMAT arrow)` → `.arrow` files
+`ArrowIpc.export()` (C Data Interface) → `.arrow` files
 
 | Type | XML (MB) | Arrow (MB) | Savings | Parse+Export (s) | Tx Rows |
 |------|----------|------------|---------|-----------------|---------|
-| A — 1×1M txns | 516 | ~225 | ~56% | ~10 | 1,000,000 |
-| B — 2×500K txns | 516 | ~225 | ~56% | ~8 | 1,000,000 |
-| C — 1M×1 txns | 888 | ~362 | ~59% | ~22 | 1,000,000 |
-| D — 2×100 (valid) | 0.1 | <1 | — | <1 | 200 |
-| E — 2×100 (invalid CtrlSum) | 0.1 | <1 | — | <1 | 200 |
+| A — 1×1M txns | 516 | ~295 | ~43% | ~90 | 1,000,000 |
+| B — 2×500K txns | 516 | ~295 | ~43% | ~90 | 1,000,000 |
+| C — 1M×1 txns | 888 | ~495 | ~44% | ~90 | 1,000,000 |
+| D — 2×100 (valid) | <1 | <1 | — | <1 | 200 |
+| E — 2×100 (invalid CtrlSum) | <1 | <1 | — | <1 | 200 |
 
-> Exact timings vary by machine. Run `ArrowFileLoadBenchmarkTest` for measured results.
-> The Arrow export (`COPY TO`) typically adds ~1–2 s on top of the parse time.
+> Timings include XML generation (first run) + parse + Arrow export.
+> Arrow files are cached; subsequent benchmark runs skip generation.
 
 ---
 
 ## Arrow File → DuckDB Load Benchmark (`ArrowFileLoadBenchmarkTest`)
 
-**Path:** pre-exported `.arrow` files → `read_arrow()` → DuckDB `CREATE TABLE AS SELECT`
+**Path:** pre-exported `.arrow` files → `ArrowIpc.load()` → DuckDB `CREATE TABLE AS SELECT`
 
-Console output (run `mvn test -pl pgw-validator -Dtest=ArrowFileLoadBenchmarkTest`):
+Actual results from `mvn test -pl pgw-validator -Dtest=ArrowFileLoadBenchmarkTest`:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -120,24 +122,24 @@ Console output (run `mvn test -pl pgw-validator -Dtest=ArrowFileLoadBenchmarkTes
 ╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦══════════════╦═════════════╣
 ║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║  Rows/sec    ║  Tx Rows    ║
 ╠══════════╬═══════════╬═══════════╬════════════╬═══════════╬════════════╬══════════════╬═════════════╣
-║  Type A   ║       <1  ║       <1  ║   229,803  ║  229,806  ║       ~380 ║  ~2,600,000  ║   1,000,000 ║
-║  Type B   ║       <1  ║       <1  ║   229,695  ║  229,698  ║       ~376 ║  ~2,660,000  ║   1,000,000 ║
-║  Type C   ║       <1  ║  139,064  ║   231,702  ║  370,767  ║       ~687 ║  ~2,910,000  ║   1,000,000 ║
-║  Type D   ║       <1  ║       <1  ║       <1   ║      <1   ║        <5  ║          —   ║         200 ║
-║  Type E   ║       <1  ║       <1  ║       <1   ║      <1   ║        <5  ║          —   ║         200 ║
+║  Type A   ║         0 ║         2 ║    301,709 ║   301,712 ║        598 ║    1,672,242 ║   1,000,000 ║
+║  Type B   ║         0 ║         2 ║    301,600 ║   301,604 ║        588 ║    1,700,683 ║   1,000,000 ║
+║  Type C   ║         0 ║   205,125 ║    301,654 ║   506,780 ║      1,176 ║    1,700,680 ║   1,000,000 ║
+║  Type D   ║         0 ║         2 ║         61 ║        65 ║         16 ║       12,625 ║         200 ║
+║  Type E   ║         0 ║         2 ║         61 ║        65 ║         23 ║        8,782 ║         200 ║
 ╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩══════════════╩═════════════╝
 ```
 
-> Downstream consumers load 1 M rows from Arrow files in **376–687 ms**
-> using DuckDB's native `read_arrow()` function.
+> Downstream consumers load **1 M rows from Arrow IPC files in 588–1,176 ms**
+> using `ArrowIpc.load()` (C Data Interface, no extension).
 
 ---
 
 ## Validation Benchmark (`ValidationBenchmarkTest`)
 
-**Path:** `.arrow` files → `read_arrow()` → DuckDB → `ValidationPipeline.standard()`
+**Path:** `.arrow` files → `ArrowIpc.load()` → DuckDB → `ValidationPipeline.standard()`
 
-Console output (run `mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest`):
+Actual results from `mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest`:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -145,18 +147,19 @@ Console output (run `mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest`)
 ╠══════════╦════════════╦══════════════╦══════════════╦═══════════╦══════════════╦═══════════╣
 ║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║  Tx Rows  ║ rows/ms (val)║  Result   ║
 ╠══════════╬════════════╬══════════════╬══════════════╬═══════════╬══════════════╬═══════════╣
-║  Type A  ║    229,806 ║         ~380 ║          ~79 ║ 1,000,000 ║      ~12,658 ║ ✓ PASSED  ║
-║  Type B  ║    229,698 ║         ~379 ║          ~79 ║ 1,000,000 ║      ~12,658 ║ ✓ PASSED  ║
-║  Type C  ║    370,767 ║         ~714 ║         ~321 ║ 1,000,000 ║       ~3,115 ║ ✓ PASSED  ║
-║  Type D  ║         65 ║          <10 ║           <5 ║       200 ║           —  ║ ✓ PASSED  ║
-║  Type E  ║         65 ║          <10 ║           <5 ║       200 ║           —  ║ ✗ 3 err   ║
+║  Type A   ║    301,712 ║          602 ║           74 ║ 1,000,000 ║       13,514 ║ ✓ PASSED  ║
+║  Type B   ║    301,604 ║          579 ║           85 ║ 1,000,000 ║       11,765 ║ ✓ PASSED  ║
+║  Type C   ║    506,780 ║        1,168 ║          325 ║ 1,000,000 ║        3,077 ║ ✓ PASSED  ║
+║  Type D   ║         65 ║           15 ║            6 ║       200 ║           33 ║ ✓ PASSED  ║
+║  Type E   ║         65 ║           14 ║            7 ║       200 ║           29 ║ ✗ 3 err   ║
 ╠══════════╬════════════╬══════════════╬══════════════╬═══════════╬══════════════╬═══════════╣
-║  TOTAL   ║  1,110,226 ║       ~1,473 ║         ~479 ║ 3,000,400 ║          —   ║     —     ║
+║  TOTAL    ║  1,110,226 ║        2,378 ║          497 ║ 3,000,400 ║        6,037 ║ —         ║
 ╚══════════╩════════════╩══════════════╩══════════════╩═══════════╩══════════════╩═══════════╝
 ```
 
-- **DuckDB ms** = time for `read_arrow()` + `CREATE TABLE AS SELECT` per table
-- **Validate ms** = time for `ValidationPipeline.standard()` — 4 SQL validators in parallel
+- **DuckDB ms** = time for `ArrowIpc.load()` (ArrowStreamReader → registerArrowStream → CREATE TABLE) per file
+- **Validate ms** = time for `ValidationPipeline.standard()` — 4 SQL validators in parallel virtual threads
+- **TOTAL: 2,378 ms load + 497 ms validation** across 3,000,400 rows (5 types combined)
 - Type E correctly reports **3 control-sum errors** (2 remittance-level + 1 message-level)
 
 ---
@@ -176,14 +179,18 @@ checking that `allocator.getAllocatedMemory() == 0` after every iteration.
 
 ---
 
-## CI
+## Full Test Run Summary
 
-Tests run automatically on every push/PR via `.github/workflows/ci.yml`:
+```
+[INFO] Tests run: 4, Failures: 0, Errors: 0  -- ParsePipelineTest       (pgw-ingestor)
+[INFO] Tests run: 4, Failures: 0, Errors: 0  -- StreamingPipelineTest   (pgw-ingestor)
+[INFO] Tests run: 3, Failures: 0, Errors: 0  -- MemoryLeakVerificationTest (pgw-ingestor)
+[INFO] Tests run: 2, Failures: 0, Errors: 0  -- ValidationTest          (pgw-validator)
+[INFO] Tests run: 1, Failures: 0, Errors: 0  -- ArrowFileLoadBenchmarkTest (pgw-validator)
+[INFO] Tests run: 1, Failures: 0, Errors: 0  -- ValidationBenchmarkTest (pgw-validator)
 
-- **Fast tests** (`ParsePipelineTest`, `StreamingPipelineTest`, `MemoryLeakVerificationTest`,
-  `ValidationTest`) — always run, < 30 s
-- **Benchmark tests** (`ArrowFileLoadBenchmarkTest`, `ValidationBenchmarkTest`) — run on
-  `workflow_dispatch` or when commit message contains `[bench]`
+pgw-ingestor  : 11 tests — BUILD SUCCESS
+pgw-validator :  4 tests — BUILD SUCCESS
+Total         : 15 tests — BUILD SUCCESS  (01:47 min)
+```
 
-The workflow calls `install-arrow-extension.sh` to install the DuckDB Arrow extension
-before running any tests.

@@ -41,12 +41,12 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn clean compile -pl pgw-ingestor,pgw-validator --also-make 2>&1 | tail -5
 
 echo ""
-echo "Step 2: Running full test suite (pgw-validator)..."
+echo "Step 2: Running full test suite (pgw-ingestor + pgw-validator)..."
 echo ""
 
 # ── Step 2: run tests, tee output ─────────────────────────────────────────────
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
-  mvn test -pl pgw-validator --also-make 2>&1 | tee "$OUTPUT_FILE"
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+  mvn test -pl pgw-ingestor,pgw-validator 2>&1 | tee "$OUTPUT_FILE"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

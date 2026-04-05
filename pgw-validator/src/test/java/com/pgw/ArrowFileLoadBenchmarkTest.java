@@ -39,9 +39,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class ArrowFileLoadBenchmarkTest {
 
     /** Allocator limit for small files (D, E). */
-    private static final long SMALL_ALLOCATOR_LIMIT = 512L * 1024 * 1024;     // 512 MB
+    private static final long SMALL_ALLOCATOR_LIMIT  = 512L  * 1024 * 1024;       //  512 MB
     /** Allocator limit for large files (A, B, C - up to ~500 MB Arrow off-heap). */
-    private static final long LARGE_ALLOCATOR_LIMIT = 2L * 1024 * 1024 * 1024; // 2 GB
+    private static final long LARGE_ALLOCATOR_LIMIT  = 2L   * 1024 * 1024 * 1024; //   2 GB
+    /** Allocator limit for extra-large files (F, G - 2M–4M transactions). */
+    private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024; //   4 GB
 
     private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
 
@@ -61,7 +63,7 @@ class ArrowFileLoadBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Arrow file to DuckDB load benchmark - all types A through E")
+    @DisplayName("Arrow file to DuckDB load benchmark - all types A through G")
     void arrowIpcLoadBenchmarkAllTypes() throws Exception {
         List<BenchmarkResult> results = new ArrayList<>();
 
@@ -70,6 +72,8 @@ class ArrowFileLoadBenchmarkTest {
         results.add(runBenchmark(TestPainFileSpecs.TYPE_C, LARGE_ALLOCATOR_LIMIT));
         results.add(runBenchmark(TestPainFileSpecs.TYPE_D, SMALL_ALLOCATOR_LIMIT));
         results.add(runBenchmark(TestPainFileSpecs.TYPE_E, SMALL_ALLOCATOR_LIMIT));
+        results.add(runBenchmark(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
+        results.add(runBenchmark(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
 
         printBenchmarkReport(results);
 
@@ -78,6 +82,8 @@ class ArrowFileLoadBenchmarkTest {
         assertRowCounts(results.get(2), 1_000_000L, 1_000_000L); // Type C
         assertRowCounts(results.get(3), 2L,         200L);        // Type D
         assertRowCounts(results.get(4), 2L,         200L);        // Type E
+        assertRowCounts(results.get(5), 1L,         2_000_000L); // Type F
+        assertRowCounts(results.get(6), 1L,         4_000_000L); // Type G
     }
 
     private static void assertRowCounts(BenchmarkResult r,
@@ -103,11 +109,13 @@ class ArrowFileLoadBenchmarkTest {
         Path rmtFile = OUTPUT_DIR.resolve(base + "_remittance.arrow");
         Path txFile  = OUTPUT_DIR.resolve(base + "_transaction.arrow");
 
+        String duckDbMemoryLimit = allocatorLimit >= XLARGE_ALLOCATOR_LIMIT ? "2GB" : "1GB";
+
         if (!Files.exists(msgFile) || !Files.exists(rmtFile) || !Files.exists(txFile)) {
             try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
                 DuckDBConnection conn = DuckDbFactory.newConnection();
                 try (var stmt = conn.createStatement()) {
-                    stmt.execute("SET memory_limit='1GB'");
+                    stmt.execute("SET memory_limit='" + duckDbMemoryLimit + "'");
                 }
                 StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
                 PainParser parser = new PainParserImpl();
@@ -133,7 +141,7 @@ class ArrowFileLoadBenchmarkTest {
         try (RootAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection loadConn = DuckDbFactory.newConnection();
             try (var stmt = loadConn.createStatement()) {
-                stmt.execute("SET memory_limit='1GB'");
+                stmt.execute("SET memory_limit='" + duckDbMemoryLimit + "'");
             }
             ArrowIpc.load(loadConn, "message",      msgFile, loadAllocator);
             ArrowIpc.load(loadConn, "remittance",   rmtFile, loadAllocator);

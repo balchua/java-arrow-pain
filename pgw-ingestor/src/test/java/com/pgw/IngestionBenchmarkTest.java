@@ -43,8 +43,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class IngestionBenchmarkTest {
 
-    private static final long SMALL_ALLOCATOR_LIMIT = 512L * 1024 * 1024;       // 512 MB
-    private static final long LARGE_ALLOCATOR_LIMIT = 2L * 1024 * 1024 * 1024L; // 2 GB
+    private static final long SMALL_ALLOCATOR_LIMIT  = 512L  * 1024 * 1024;       //  512 MB
+    private static final long LARGE_ALLOCATOR_LIMIT  = 2L   * 1024 * 1024 * 1024L; //   2 GB
+    private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024L; //   4 GB
 
     private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
 
@@ -66,7 +67,7 @@ class IngestionBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Ingestion benchmark — XML → DuckDB INSERT → ArrowIpc.export() — all types A through E")
+    @DisplayName("Ingestion benchmark — XML → DuckDB INSERT → ArrowIpc.export() — all types A through G")
     void ingestionBenchmarkAllTypes() throws Exception {
         List<IngestionResult> results = new ArrayList<>();
 
@@ -75,6 +76,8 @@ class IngestionBenchmarkTest {
         results.add(runIngestion(TestPainFileSpecs.TYPE_C, LARGE_ALLOCATOR_LIMIT));
         results.add(runIngestion(TestPainFileSpecs.TYPE_D, SMALL_ALLOCATOR_LIMIT));
         results.add(runIngestion(TestPainFileSpecs.TYPE_E, SMALL_ALLOCATOR_LIMIT));
+        results.add(runIngestion(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
+        results.add(runIngestion(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
 
         printReport(results);
 
@@ -84,6 +87,8 @@ class IngestionBenchmarkTest {
         assertEquals(1_000_000L, results.get(2).transactionRows(), "Type C: expected 1M tx rows");
         assertEquals(200L,       results.get(3).transactionRows(), "Type D: expected 200 tx rows");
         assertEquals(200L,       results.get(4).transactionRows(), "Type E: expected 200 tx rows");
+        assertEquals(2_000_000L, results.get(5).transactionRows(), "Type F: expected 2M tx rows");
+        assertEquals(4_000_000L, results.get(6).transactionRows(), "Type G: expected 4M tx rows");
 
         for (IngestionResult r : results) {
             assertTrue(r.parseAndInsertMs() >= 0, "Parse+insert time must be non-negative: " + r.label());
@@ -112,10 +117,12 @@ class IngestionBenchmarkTest {
         long parseAndInsertMs;
         long arrowExportMs;
 
+        String duckDbMemoryLimit = allocatorLimit >= XLARGE_ALLOCATOR_LIMIT ? "2GB" : "1GB";
+
         try (RootAllocator allocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection conn = DuckDbFactory.newConnection();
             try (var stmt = conn.createStatement()) {
-                stmt.execute("SET memory_limit='1GB'");
+                stmt.execute("SET memory_limit='" + duckDbMemoryLimit + "'");
             }
 
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);

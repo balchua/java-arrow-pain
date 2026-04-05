@@ -49,8 +49,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ValidationBenchmarkTest {
 
-    private static final long SMALL_ALLOCATOR_LIMIT = 512L * 1024 * 1024;     // 512 MB
-    private static final long LARGE_ALLOCATOR_LIMIT = 2L * 1024 * 1024 * 1024; // 2 GB
+    private static final long SMALL_ALLOCATOR_LIMIT  = 512L  * 1024 * 1024;       //  512 MB
+    private static final long LARGE_ALLOCATOR_LIMIT  = 2L   * 1024 * 1024 * 1024; //   2 GB
+    private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024; //   4 GB
 
     private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
 
@@ -67,7 +68,7 @@ class ValidationBenchmarkTest {
     ) {}
 
     @Test
-    @DisplayName("Validation stage benchmark — Arrow→DuckDB load + SQL validation — all types A through E")
+    @DisplayName("Validation stage benchmark — Arrow→DuckDB load + SQL validation — all types A through G")
     void validationBenchmarkAllTypes() throws Exception {
         List<ValidationResult> results = new ArrayList<>();
 
@@ -76,6 +77,8 @@ class ValidationBenchmarkTest {
         results.add(runValidation(TestPainFileSpecs.TYPE_C, LARGE_ALLOCATOR_LIMIT));
         results.add(runValidation(TestPainFileSpecs.TYPE_D, SMALL_ALLOCATOR_LIMIT));
         results.add(runValidation(TestPainFileSpecs.TYPE_E, SMALL_ALLOCATOR_LIMIT));
+        results.add(runValidation(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
+        results.add(runValidation(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
 
         printReport(results);
 
@@ -85,6 +88,8 @@ class ValidationBenchmarkTest {
         assertEquals(1_000_000L, results.get(2).transactionRows(), "Type C: expected 1M tx rows");
         assertEquals(200L,       results.get(3).transactionRows(), "Type D: expected 200 tx rows");
         assertEquals(200L,       results.get(4).transactionRows(), "Type E: expected 200 tx rows");
+        assertEquals(2_000_000L, results.get(5).transactionRows(), "Type F: expected 2M tx rows");
+        assertEquals(4_000_000L, results.get(6).transactionRows(), "Type G: expected 4M tx rows");
 
         assertTrue(results.get(3).passed(),  "Type D should pass validation");
         assertFalse(results.get(4).passed(), "Type E should fail validation (invalid CtrlSum)");
@@ -105,8 +110,10 @@ class ValidationBenchmarkTest {
         Path rmtFile = OUTPUT_DIR.resolve(base + "_remittance.arrow");
         Path txFile  = OUTPUT_DIR.resolve(base + "_transaction.arrow");
 
+        String duckDbMemoryLimit = allocatorLimit >= XLARGE_ALLOCATOR_LIMIT ? "2GB" : "1GB";
+
         if (!Files.exists(msgFile) || !Files.exists(rmtFile) || !Files.exists(txFile)) {
-            generateArrowFiles(xmlFile, base, allocatorLimit);
+            generateArrowFiles(xmlFile, base, allocatorLimit, duckDbMemoryLimit);
         }
 
         long totalArrowBytes = Files.size(msgFile) + Files.size(rmtFile) + Files.size(txFile);
@@ -124,7 +131,7 @@ class ValidationBenchmarkTest {
         try (RootAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection loadConn = DuckDbFactory.newConnection();
             try (var stmt = loadConn.createStatement()) {
-                stmt.execute("SET memory_limit='1GB'");
+                stmt.execute("SET memory_limit='" + duckDbMemoryLimit + "'");
             }
             ArrowIpc.load(loadConn, "message",      msgFile, loadAllocator);
             ArrowIpc.load(loadConn, "remittance",   rmtFile, loadAllocator);
@@ -160,12 +167,13 @@ class ValidationBenchmarkTest {
     // Arrow file generation (XML → DuckDB → ArrowIpc.export)
     // -------------------------------------------------------------------------
 
-    private void generateArrowFiles(Path xmlFile, String base, long allocatorLimit)
+    private void generateArrowFiles(Path xmlFile, String base, long allocatorLimit,
+            String duckDbMemoryLimit)
             throws Exception {
         try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection conn = DuckDbFactory.newConnection();
             try (var stmt = conn.createStatement()) {
-                stmt.execute("SET memory_limit='1GB'");
+                stmt.execute("SET memory_limit='" + duckDbMemoryLimit + "'");
             }
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             PainParser parser = new PainParserImpl();

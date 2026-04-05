@@ -36,7 +36,7 @@ XML → StAX parse → StreamingBatchConsumer → DuckDB (single sink)
 ```bash
 # No extension installation needed — ArrowIpc uses the C Data Interface built into DuckDB JDBC.
 
-# Full suite — both modules (all 15 tests, ~2 min on first run)
+# Full suite — both modules (all 16 tests, ~10 min on first run for Types F & G)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor,pgw-validator
 
@@ -70,7 +70,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor -Dtest=MemoryLeakVerificationTest
 
-# Ingestion benchmark only (generates Types A–C on first run, ~1.5 min)
+# Ingestion benchmark only (generates Types A–G on first run; F & G take ~5 min)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor -Dtest=IngestionBenchmarkTest
 ```
@@ -82,7 +82,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 | `ParsePipelineTest` | StAX parser correctness: row counts, field values, edge cases | 4 |
 | `StreamingPipelineTest` | Memory footprint; DuckDB row counts; `ArrowIpc.export` + `ArrowIpc.load` round-trip | 4 |
 | `MemoryLeakVerificationTest` | 50-iteration streaming parse stress test — zero bytes leaked | 3 |
-| `IngestionBenchmarkTest` | XML → DuckDB INSERT → Arrow export benchmark for Types A–E (parse ms, export ms, peak memory) | 1 |
+| `IngestionBenchmarkTest` | XML → DuckDB INSERT → Arrow export benchmark for Types A–G (parse ms, export ms, peak memory) | 1 |
 | **Total** | | **12** |
 
 ## `pgw-ingestor` Test Results
@@ -107,13 +107,15 @@ pgw-ingestor  :  12 tests — BUILD SUCCESS
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
 ║  Type    ║ XML (MB) ║ Parse+Ins ms ║ Export ms  ║ Peak Off-Heap  ║ Arrow (MB) ║  Tx Rows  ║
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
-║  Type A  ║   734.4  ║      15,558  ║       599  ║   31,309,824   ║    294.64 ║ 1,000,000 ║
-║  Type B  ║   734.3  ║      13,535  ║       558  ║   31,309,824   ║    294.54 ║ 1,000,000 ║
-║  Type C  ║ 1,295.1  ║      29,739  ║       916  ║   52,101,120   ║    494.90 ║ 1,000,000 ║
-║  Type D  ║     0.1  ║          12  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
-║  Type E  ║     0.1  ║          10  ║         4  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type A  ║   734.4  ║      15,843  ║       578  ║   31,309,824   ║    294.64 ║ 1,000,000 ║
+║  Type B  ║   734.3  ║      14,186  ║       560  ║   31,309,824   ║    294.54 ║ 1,000,000 ║
+║  Type C  ║ 1,295.1  ║      30,048  ║       910  ║   52,101,120   ║    494.90 ║ 1,000,000 ║
+║  Type D  ║     0.1  ║          13  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type E  ║     0.1  ║          13  ║         6  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type F  ║ 1,469.8  ║      29,590  ║     1,087  ║   31,309,824   ║    590.34 ║ 2,000,000 ║
+║  Type G  ║ 2,940.7  ║      59,827  ║     2,340  ║   31,309,824   ║  1,181.73 ║ 4,000,000 ║
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
-║  TOTAL   ║ 2,764.1  ║      58,854  ║     2,082  ║   52,101,120   ║  1,084.21 ║ 3,000,400 ║
+║  TOTAL   ║ 7,174.6  ║     149,520  ║     5,486  ║   52,101,120   ║  2,856.27 ║ 9,000,400 ║
 ╚══════════╩══════════╩══════════════╩════════════╩════════════════╩════════════╩═══════════╝
 
   XML (MB)       = source XML file size on disk
@@ -125,10 +127,12 @@ pgw-ingestor  :  12 tests — BUILD SUCCESS
 ```
 
 **Key findings:**
-- Type C (1M PmtInf × 1 TxInf) is the slowest to ingest (29,739 ms) due to 1M separate `INSERT INTO … SELECT *` batch calls — one per remittance group
+- Type C (1M PmtInf × 1 TxInf) is the slowest to ingest (30,048 ms) due to 1M separate `INSERT INTO … SELECT *` batch calls — one per remittance group
 - Types A and B are ~2× faster because fewer, larger batches (1–2 `PmtInf` groups → ~16 batches of 65k rows each)
-- Arrow export is fast in all cases (599–916 ms for 1M rows) — bounded to one 65k-row batch at a time off-heap
-- Peak off-heap stays bounded to one batch per table (~30–52 MB total), not proportional to XML file size
+- **Type F (1 PmtInf × 2M TxInf)** ingests 2M transactions in 29,590 ms — similar throughput to Type A (1M in 15,843 ms), confirming near-linear scaling
+- **Type G (1 PmtInf × 4M TxInf)** ingests 4M transactions in 59,827 ms — scales linearly with row count
+- Arrow export is fast in all cases (578–2,340 ms) — bounded to one 65k-row batch at a time off-heap
+- **Peak off-heap stays bounded at ~31 MB** for all single-remittance types (A, B, D, E, F, G) — even with 4M transactions, the streaming architecture keeps memory flat
 
 ## `pgw-ingestor` — Memory Leak Verification (`MemoryLeakVerificationTest`)
 
@@ -190,8 +194,8 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
 | Test Class | What It Tests | Tests |
 |-----------|--------------|------:|
 | `ValidationTest` | Domain validation correctness: Type D passes, Type E fails with 3 errors | 2 |
-| `ArrowFileLoadBenchmarkTest` | Arrow file → DuckDB load time only (no validation), all 5 types | 1 |
-| `ValidationBenchmarkTest` | Arrow → DuckDB load time **+** SQL validation time, separated, all 5 types | 1 |
+| `ArrowFileLoadBenchmarkTest` | Arrow file → DuckDB load time only (no validation), all 7 types | 1 |
+| `ValidationBenchmarkTest` | Arrow → DuckDB load time **+** SQL validation time, separated, all 7 types | 1 |
 | **Total** | | **4** |
 
 ## `pgw-validator` Test Results
@@ -201,7 +205,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
 [INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0  -- ArrowFileLoadBenchmarkTest
 [INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0  -- ValidationBenchmarkTest
 
-pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file generation)
+pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates large files for Types F & G)
 ```
 
 ## `pgw-validator` — Arrow File → DuckDB Load Benchmark (`ArrowFileLoadBenchmarkTest`)
@@ -214,18 +218,21 @@ pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file gen
 ╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦════════════════╦══════════════╦═════════════╣
 ║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║ Peak Off-Heap  ║  Rows/sec    ║  Tx Rows    ║
 ╠══════════╬═══════════╬═══════════╬════════════╬═══════════╬════════════╬════════════════╬══════════════╬═════════════╣
-║  Type A   ║         0 ║         2 ║    301,709 ║   301,712 ║      1,662 ║    121,576,854 ║      601,685 ║   1,000,000 ║
-║  Type B   ║         0 ║         2 ║    301,600 ║   301,604 ║        754 ║    121,566,686 ║    1,326,262 ║   1,000,000 ║
-║  Type C   ║         0 ║   205,125 ║    301,654 ║   506,780 ║      1,617 ║    121,511,222 ║    1,236,858 ║   1,000,000 ║
-║  Type D   ║         0 ║         2 ║         61 ║        65 ║         21 ║         70,486 ║        9,619 ║         200 ║
-║  Type E   ║         0 ║         2 ║         61 ║        65 ║         18 ║         70,486 ║       11,222 ║         200 ║
+║  Type A   ║         0 ║         2 ║    301,709 ║   301,712 ║        635 ║    121,576,854 ║    1,574,804 ║   1,000,000 ║
+║  Type B   ║         0 ║         2 ║    301,600 ║   301,604 ║        636 ║    121,541,462 ║    1,572,330 ║   1,000,000 ║
+║  Type C   ║         0 ║   205,125 ║    301,654 ║   506,780 ║      1,291 ║    121,511,222 ║    1,549,186 ║   1,000,000 ║
+║  Type D   ║         0 ║         2 ║         61 ║        65 ║         17 ║         70,486 ║       11,882 ║         200 ║
+║  Type E   ║         0 ║         2 ║         61 ║        65 ║         15 ║         70,486 ║       13,466 ║         200 ║
+║  Type F   ║         0 ║         2 ║    604,501 ║   604,504 ║      1,255 ║    121,904,534 ║    1,593,626 ║   2,000,000 ║
+║  Type G   ║         0 ║         2 ║  1,210,086 ║ 1,210,090 ║      2,129 ║    121,904,574 ║    1,878,816 ║   4,000,000 ║
 ╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩════════════════╩══════════════╩═════════════╝
 
   Peak Off-Heap = Arrow allocator peak off-heap bytes during ArrowIpc.load (ArrowStreamReader batches)
 ```
 
-- Downstream consumers load **1 M rows from Arrow IPC files in 754–1,662 ms** using `ArrowIpc.load()` (C Data Interface, no extension)
-- Peak off-heap for large types is ~121 MB (one batch of 65k rows per table held transiently during load)
+- Downstream consumers load **1 M rows from Arrow IPC files in 635–1,291 ms** and **4M rows in 2,129 ms** using `ArrowIpc.load()` (C Data Interface, no extension)
+- **Type F (2M rows)** loads in 1,255 ms; **Type G (4M rows)** loads in 2,129 ms — near-linear scaling with row count
+- Peak off-heap for large types is ~121–122 MB (one batch of 65k rows per table held transiently during load) — bounded regardless of file size
 - `Msg KB` shows 0 because the single-row message table is sub-1 KB (rounds down)
 
 ## `pgw-validator` — Validation Benchmark (`ValidationBenchmarkTest`)
@@ -238,13 +245,15 @@ pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file gen
 ╠══════════╦════════════╦══════════════╦══════════════╦════════════════╦═══════════╦══════════════╦═══════════╣
 ║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║ Peak Off-Heap  ║  Tx Rows  ║ rows/ms (val)║  Result   ║
 ╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
-║  Type A   ║    301,712 ║        1,688 ║           98 ║    121,576,854 ║ 1,000,000 ║       10,204 ║ ✓ PASSED  ║
-║  Type B   ║    301,604 ║          771 ║           90 ║    121,566,686 ║ 1,000,000 ║       11,111 ║ ✓ PASSED  ║
-║  Type C   ║    506,780 ║        1,589 ║          328 ║    121,511,222 ║ 1,000,000 ║        3,049 ║ ✓ PASSED  ║
-║  Type D   ║         65 ║           19 ║            7 ║         70,486 ║       200 ║           29 ║ ✓ PASSED  ║
-║  Type E   ║         65 ║           18 ║           10 ║         70,486 ║       200 ║           20 ║ ✗ 3 err   ║
+║  Type A   ║    301,712 ║          621 ║           77 ║    121,576,862 ║ 1,000,000 ║       12,987 ║ ✓ PASSED  ║
+║  Type B   ║    301,604 ║          805 ║           85 ║    121,566,686 ║ 1,000,000 ║       11,765 ║ ✓ PASSED  ║
+║  Type C   ║    506,780 ║        1,165 ║          331 ║    121,521,822 ║ 1,000,000 ║        3,021 ║ ✓ PASSED  ║
+║  Type D   ║         65 ║           15 ║            6 ║         70,486 ║       200 ║           33 ║ ✓ PASSED  ║
+║  Type E   ║         65 ║           15 ║            7 ║         70,486 ║       200 ║           29 ║ ✗ 3 err   ║
+║  Type F   ║    604,504 ║        1,218 ║          132 ║    121,904,534 ║ 2,000,000 ║       15,152 ║ ✓ PASSED  ║
+║  Type G   ║  1,210,090 ║        1,888 ║          250 ║    121,970,118 ║ 4,000,000 ║       16,000 ║ ✓ PASSED  ║
 ╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
-║  TOTAL    ║  1,110,226 ║        4,085 ║          533 ║    121,576,854 ║ 3,000,400 ║        5,629 ║ —         ║
+║  TOTAL    ║  2,924,820 ║        5,727 ║          888 ║    121,970,118 ║ 9,000,400 ║       10,136 ║ —         ║
 ╚══════════╩════════════╩══════════════╩══════════════╩════════════════╩═══════════╩══════════════╩═══════════╝
 
   DuckDB ms      = time for ArrowIpc.load() per file (ArrowStreamReader → registerArrowStream → CREATE TABLE AS SELECT)
@@ -253,10 +262,12 @@ pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file gen
   rows/ms (val)  = transaction row scan throughput during SQL validation
 ```
 
-- **TOTAL: 4,085 ms load + 533 ms validation** across 3,000,400 rows (5 types combined)
-- Type C is slowest to validate (328 ms) because it has 1M remittances to JOIN
+- **TOTAL: 5,727 ms load + 888 ms validation** across 9,000,400 rows (7 types combined)
+- **Type F (2M rows):** loads in 1,218 ms, validates in 132 ms (15,152 rows/ms) — ✓ PASSED
+- **Type G (4M rows):** loads in 1,888 ms, validates in 250 ms (16,000 rows/ms) — ✓ PASSED
+- Type C is slowest to validate (331 ms) because it has 1M remittances to JOIN
 - Type E correctly reports **3 control-sum errors** (2 remittance-level + 1 message-level)
-- Peak off-heap ~121 MB for large types (bounded to one 65k-row batch per table at a time)
+- Peak off-heap ~122 MB for large types (bounded to one 65k-row batch per table at a time)
 
 ---
 
@@ -271,7 +282,7 @@ pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file gen
   ParsePipelineTest          :  4 tests — PASS
   StreamingPipelineTest      :  4 tests — PASS  (ArrowIpc export + load round-trip)
   MemoryLeakVerificationTest :  3 tests — PASS  (103 iterations, 0 bytes leaked)
-  IngestionBenchmarkTest     :  1 test  — PASS  (XML→DuckDB→Arrow export, peak ~52 MB off-heap)
+  IngestionBenchmarkTest     :  1 test  — PASS  (Types A–G, peak ~52 MB off-heap, 4M rows in ~60s)
   ─────────────────────────────────────────────
   Subtotal                   : 12 tests — BUILD SUCCESS
 
@@ -279,8 +290,8 @@ pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file gen
   pgw-validator
 ══════════════════════════════════════════════════════════════
   ValidationTest             :  2 tests — PASS  (Type D passes, Type E fails correctly)
-  ArrowFileLoadBenchmarkTest :  1 test  — PASS  (1M rows loaded in 754–1,662 ms, peak ~121 MB)
-  ValidationBenchmarkTest    :  1 test  — PASS  (load 4,085 ms + validate 533 ms, peak ~121 MB)
+  ArrowFileLoadBenchmarkTest :  1 test  — PASS  (4M rows loaded in 2,129 ms, peak ~122 MB)
+  ValidationBenchmarkTest    :  1 test  — PASS  (load 5,727 ms + validate 888 ms, peak ~122 MB)
   ─────────────────────────────────────────────
   Subtotal                   :  4 tests — BUILD SUCCESS
 

@@ -1,0 +1,83 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  # ── Fast correctness tests (< 30 s, no large file generation) ───────────────
+  fast-tests:
+    name: Fast Tests (Types D + E)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build (skip tests)
+        run: |
+          MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+            mvn clean package -DskipTests -q
+
+      # These tests use only the Arrow C Data Interface (built into DuckDB JDBC)
+      # — no community arrow extension required.
+      - name: Run tests — parse pipeline, memory leak, validation (no arrow extension)
+        run: |
+          MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+            mvn test -pl pgw-ingestor,pgw-validator \
+            -Dtest="ParsePipelineTest,MemoryLeakVerificationTest,ValidationTest"
+
+      # StreamingPipelineTest verifies COPY TO (FORMAT arrow) and read_arrow()
+      # — requires the DuckDB Arrow community extension.
+      - name: Install DuckDB Arrow extension
+        run: bash install-arrow-extension.sh
+
+      - name: Run tests — streaming pipeline + DuckDB Arrow export (Type D)
+        run: |
+          MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+            mvn test -pl pgw-ingestor \
+            -Dtest="StreamingPipelineTest"
+
+  # ── Benchmark tests (large files; triggered manually or with [bench] in commit) ──
+  benchmarks:
+    name: Benchmarks (Types A–E)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[bench]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Install DuckDB Arrow extension
+        run: bash install-arrow-extension.sh
+
+      - name: Build (skip tests)
+        run: |
+          MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+            mvn clean package -DskipTests -q
+
+      - name: Arrow file → DuckDB load benchmark (all types A–E)
+        run: |
+          MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+            mvn test -pl pgw-validator --also-make \
+            -Dtest="ArrowFileLoadBenchmarkTest"
+
+      - name: Validation benchmark — DuckDB load + SQL validation (all types A–E)
+        run: |
+          MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+            mvn test -pl pgw-validator --also-make \
+            -Dtest="ValidationBenchmarkTest"

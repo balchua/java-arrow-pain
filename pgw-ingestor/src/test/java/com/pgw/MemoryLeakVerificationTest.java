@@ -8,6 +8,7 @@ import com.pgw.parser.StreamingBatchConsumer;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.duckdb.DuckDBConnection;
+import java.sql.DriverManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -68,7 +69,7 @@ class MemoryLeakVerificationTest {
             for (int i = 0; i < iterations; i++) {
                 long t0 = System.currentTimeMillis();
 
-                DuckDBConnection conn = DuckDbFactory.newConnection();
+                DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
                 try (var stmt = conn.createStatement()) {
                     stmt.execute("SET memory_limit='512MB'");
                 }

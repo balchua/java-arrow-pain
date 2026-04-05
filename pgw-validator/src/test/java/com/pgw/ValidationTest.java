@@ -11,6 +11,7 @@ import com.pgw.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.duckdb.DuckDBConnection;
+import java.sql.DriverManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,7 +36,7 @@ class ValidationTest {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = DuckDbFactory.newConnection();
+            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             new PainParserImpl().parseStreaming(file, allocator, consumer);
             try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
@@ -53,7 +54,7 @@ class ValidationTest {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_E);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = DuckDbFactory.newConnection();
+            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             new PainParserImpl().parseStreaming(file, allocator, consumer);
             try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {

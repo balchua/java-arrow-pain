@@ -29,92 +29,160 @@ XML → StAX parse → StreamingBatchConsumer → DuckDB (single sink)
                                     SQL validation pipeline
 ```
 
-`StreamingBatchConsumer` is the only sink — it inserts into DuckDB via Arrow C Data
-Interface. After parsing, `ArrowIpc.export()` (or `App.java`) uses DuckDB's built-in
-`DuckDBResultSet.arrowExportStream` to export three Arrow IPC stream files without any extension.
-
 ---
 
-## How to Run Tests
+## How to Run All Tests
 
 ```bash
 # No extension installation needed — ArrowIpc uses the C Data Interface built into DuckDB JDBC.
 
-# 1. Build
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-  mvn clean package -DskipTests
-
-# 2. Fast tests (< 30 s) — Types D + E only, table output in console
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-  mvn test -pl pgw-ingestor \
-  -Dtest="ParsePipelineTest,StreamingPipelineTest,MemoryLeakVerificationTest"
-
-# Also run the domain validation correctness tests
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-  mvn test -pl pgw-validator --also-make \
-  -Dtest="ValidationTest"
-
-# 3. Arrow→DuckDB load benchmark (all 5 types, table in console)
-#    First run generates large XML files (Types A–C: ~516–888 MB); cached on subsequent runs.
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
-  mvn test -pl pgw-validator --also-make \
-  -Dtest="ArrowFileLoadBenchmarkTest"
-
-# 4. Validation benchmark (all 5 types, DuckDB load + SQL validation, table in console)
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
-  mvn test -pl pgw-validator --also-make \
-  -Dtest="ValidationBenchmarkTest"
-
-# 5. Full suite (all 15 tests, ~2 min on first run due to large XML generation)
+# Full suite — both modules (all 15 tests, ~2 min on first run)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor,pgw-validator
 
-# 6. Standardized before/after comparison (saves timestamped log to test-results/)
+# Standardized run with timestamped log saved to test-results/
 ./run_validation_tests.sh
 ```
 
-> Both module POMs set `redirectTestOutputToFile=false` so the benchmark tables
-> (printed via `System.out`) appear directly in the Maven console output.
+---
 
 ---
 
-## Test Suite — Module Breakdown
+# `pgw-ingestor` — XML Parse + Arrow Export Tests
 
-| Module | Test Class | Type | Tests |
-|--------|-----------|------|------:|
-| `pgw-ingestor` | `ParsePipelineTest` | Correctness | 4 |
-| `pgw-ingestor` | `StreamingPipelineTest` | Correctness + ArrowIpc export/load | 4 |
-| `pgw-ingestor` | `MemoryLeakVerificationTest` | Memory safety | 3 |
-| `pgw-validator` | `ValidationTest` | Domain validation correctness | 2 |
-| `pgw-validator` | `ArrowFileLoadBenchmarkTest` | Performance | 1 |
-| `pgw-validator` | `ValidationBenchmarkTest` | Performance | 1 |
-| **Total** | | | **15** |
+**Responsibility:** StAX XML parsing → Arrow IPC batches → DuckDB live INSERT →
+`ArrowIpc.export()` → `.arrow` files on disk. No domain knowledge.
 
----
+## How to Run `pgw-ingestor` Tests
 
-## XML → DuckDB Ingestion + Arrow Export — Types A–E
+```bash
+# All ingestor tests (< 10 s)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-ingestor
+
+# Individual test classes
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-ingestor -Dtest=ParsePipelineTest
+
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-ingestor -Dtest=StreamingPipelineTest
+
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-ingestor -Dtest=MemoryLeakVerificationTest
+```
+
+## `pgw-ingestor` Test Classes
+
+| Test Class | What It Tests | Tests |
+|-----------|--------------|------:|
+| `ParsePipelineTest` | StAX parser correctness: row counts, field values, edge cases | 4 |
+| `StreamingPipelineTest` | Memory footprint; DuckDB row counts; `ArrowIpc.export` + `ArrowIpc.load` round-trip | 4 |
+| `MemoryLeakVerificationTest` | 50-iteration streaming parse stress test — zero bytes leaked | 3 |
+| **Total** | | **11** |
+
+## `pgw-ingestor` Test Results
+
+```
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0  -- ParsePipelineTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0  -- StreamingPipelineTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0  -- MemoryLeakVerificationTest
+
+pgw-ingestor  :  11 tests — BUILD SUCCESS  (5.6 s)
+```
+
+## `pgw-ingestor` — XML → DuckDB Ingestion + Arrow Export (Types A–E)
 
 **Path:** XML → StAX streaming parse → `StreamingBatchConsumer` → DuckDB →
 `ArrowIpc.export()` (C Data Interface) → `.arrow` files
 
-| Type | XML (MB) | Arrow (MB) | Savings | Parse+Export (s) | Tx Rows |
-|------|----------|------------|---------|-----------------|---------|
-| A — 1×1M txns | 516 | ~295 | ~43% | ~90 | 1,000,000 |
-| B — 2×500K txns | 516 | ~295 | ~43% | ~90 | 1,000,000 |
-| C — 1M×1 txns | 888 | ~495 | ~44% | ~90 | 1,000,000 |
-| D — 2×100 (valid) | <1 | <1 | — | <1 | 200 |
-| E — 2×100 (invalid CtrlSum) | <1 | <1 | — | <1 | 200 |
+| Type | Structure | XML (MB) | Arrow (MB) | Savings | Tx Rows |
+|------|-----------|----------|------------|---------|---------|
+| A | 1 PmtInf × 1M TxInf (fat batch) | 516 | ~295 | ~43% | 1,000,000 |
+| B | 2 PmtInf × 500K TxInf | 516 | ~295 | ~43% | 1,000,000 |
+| C | 1M PmtInf × 1 TxInf (many small) | 888 | ~495 | ~44% | 1,000,000 |
+| D | 2 PmtInf × 100 TxInf (valid) | <1 | <1 | — | 200 |
+| E | 2 PmtInf × 100 TxInf (invalid CtrlSum) | <1 | <1 | — | 200 |
 
-> Timings include XML generation (first run) + parse + Arrow export.
-> Arrow files are cached; subsequent benchmark runs skip generation.
+> Types A–C are generated on demand (large files); Types D–E are generated automatically
+> by every `mvn test` run of `pgw-ingestor`. Arrow files are cached across runs.
+
+## `pgw-ingestor` — Memory Leak Verification (`MemoryLeakVerificationTest`)
+
+Runs Types D and E 50× each through the streaming parse → DuckDB pipeline,
+checking that `allocator.getAllocatedMemory() == 0` after every iteration.
+
+| Scenario | Iterations | Bytes Leaked |
+|----------|----------:|------------:|
+| Type D (valid, streaming) | 50 | **0** |
+| Type E (invalid CtrlSum, streaming) | 50 | **0** |
+| Type D (short) | 3 | **0** |
+
+✅ **Zero bytes leaked across all 103 iterations.**
+
+## `pgw-ingestor` — `StreamingPipelineTest` Details
+
+| Test | What It Verifies |
+|------|-----------------|
+| `testMemoryFootprintIsFlat` | Peak off-heap ≤ 6 MB for Type D (2×100 rows) — confirms streaming, not accumulation |
+| `testDuckDbRowCountsMatchParsed` | Row counts in DuckDB match `ParseStats` returned by parser |
+| `testArrowFilesExported` | `ArrowIpc.export` writes non-empty files; `ArrowIpc.load` round-trips with correct row counts |
+| `testOutputPathParameter` | Files are written to the specified custom output directory |
 
 ---
 
-## Arrow File → DuckDB Load Benchmark (`ArrowFileLoadBenchmarkTest`)
+---
+
+# `pgw-validator` — Arrow → DuckDB Load + SQL Validation Tests
+
+**Responsibility:** Load pre-exported `.arrow` files into DuckDB via `ArrowIpc.load()`,
+then run the chainable SQL validation pipeline. Owns all domain (model, VOs, DAL, validators).
+
+## How to Run `pgw-validator` Tests
+
+```bash
+# All validator tests (first run ~2 min — generates large Arrow files for Types A–C)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+  mvn test -pl pgw-validator --also-make
+
+# Domain validation correctness only (fast, no file generation)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-validator --also-make -Dtest=ValidationTest
+
+# Arrow → DuckDB load benchmark only
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+  mvn test -pl pgw-validator --also-make -Dtest=ArrowFileLoadBenchmarkTest
+
+# Validation-stage benchmark (DuckDB load + SQL validation, separated timings)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+  mvn test -pl pgw-validator --also-make -Dtest=ValidationBenchmarkTest
+
+# Run the application (no benchmark, no tests)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
+```
+
+## `pgw-validator` Test Classes
+
+| Test Class | What It Tests | Tests |
+|-----------|--------------|------:|
+| `ValidationTest` | Domain validation correctness: Type D passes, Type E fails with 3 errors | 2 |
+| `ArrowFileLoadBenchmarkTest` | Arrow file → DuckDB load time only (no validation), all 5 types | 1 |
+| `ValidationBenchmarkTest` | Arrow → DuckDB load time **+** SQL validation time, separated, all 5 types | 1 |
+| **Total** | | **4** |
+
+## `pgw-validator` Test Results
+
+```
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0  -- ValidationTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0  -- ArrowFileLoadBenchmarkTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0  -- ValidationBenchmarkTest
+
+pgw-validator :   4 tests — BUILD SUCCESS  (01:41 min, includes large file generation)
+```
+
+## `pgw-validator` — Arrow File → DuckDB Load Benchmark (`ArrowFileLoadBenchmarkTest`)
 
 **Path:** pre-exported `.arrow` files → `ArrowIpc.load()` → DuckDB `CREATE TABLE AS SELECT`
-
-Actual results from `mvn test -pl pgw-validator -Dtest=ArrowFileLoadBenchmarkTest`:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -130,16 +198,12 @@ Actual results from `mvn test -pl pgw-validator -Dtest=ArrowFileLoadBenchmarkTes
 ╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩══════════════╩═════════════╝
 ```
 
-> Downstream consumers load **1 M rows from Arrow IPC files in 588–1,176 ms**
-> using `ArrowIpc.load()` (C Data Interface, no extension).
+- Downstream consumers load **1 M rows from Arrow IPC files in 588–1,176 ms** using `ArrowIpc.load()` (C Data Interface, no extension)
+- `Msg KB` shows 0 because the single-row message table is sub-1 KB (rounds down)
 
----
-
-## Validation Benchmark (`ValidationBenchmarkTest`)
+## `pgw-validator` — Validation Benchmark (`ValidationBenchmarkTest`)
 
 **Path:** `.arrow` files → `ArrowIpc.load()` → DuckDB → `ValidationPipeline.standard()`
-
-Actual results from `mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest`:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -157,40 +221,40 @@ Actual results from `mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest`:
 ╚══════════╩════════════╩══════════════╩══════════════╩═══════════╩══════════════╩═══════════╝
 ```
 
-- **DuckDB ms** = time for `ArrowIpc.load()` (ArrowStreamReader → registerArrowStream → CREATE TABLE) per file
-- **Validate ms** = time for `ValidationPipeline.standard()` — 4 SQL validators in parallel virtual threads
+- **DuckDB ms** = time for `ArrowIpc.load()` per file (ArrowStreamReader → registerArrowStream → CREATE TABLE AS SELECT)
+- **Validate ms** = time for `ValidationPipeline.standard()` — 4 SQL validators running in parallel virtual threads
 - **TOTAL: 2,378 ms load + 497 ms validation** across 3,000,400 rows (5 types combined)
+- Type C is slowest to validate (325 ms) because it has 1M remittances to JOIN
 - Type E correctly reports **3 control-sum errors** (2 remittance-level + 1 message-level)
 
 ---
 
-## Memory Leak Verification (`MemoryLeakVerificationTest`)
-
-Runs Type D and E 50× each through the streaming parse → DuckDB pipeline,
-checking that `allocator.getAllocatedMemory() == 0` after every iteration.
-
-| Scenario | Iterations | Bytes Leaked |
-|----------|----------:|------------:|
-| Type D (valid, streaming) | 50 | **0** |
-| Type E (invalid CtrlSum, streaming) | 50 | **0** |
-| Type D (short) | 3 | **0** |
-
-✅ **Zero bytes leaked across all 103 iterations.**
-
 ---
 
-## Full Test Run Summary
+# Full Test Run Summary
 
 ```
-[INFO] Tests run: 4, Failures: 0, Errors: 0  -- ParsePipelineTest       (pgw-ingestor)
-[INFO] Tests run: 4, Failures: 0, Errors: 0  -- StreamingPipelineTest   (pgw-ingestor)
-[INFO] Tests run: 3, Failures: 0, Errors: 0  -- MemoryLeakVerificationTest (pgw-ingestor)
-[INFO] Tests run: 2, Failures: 0, Errors: 0  -- ValidationTest          (pgw-validator)
-[INFO] Tests run: 1, Failures: 0, Errors: 0  -- ArrowFileLoadBenchmarkTest (pgw-validator)
-[INFO] Tests run: 1, Failures: 0, Errors: 0  -- ValidationBenchmarkTest (pgw-validator)
+══════════════════════════════════════════════════════════════
+  pgw-ingestor
+══════════════════════════════════════════════════════════════
+  ParsePipelineTest          :  4 tests — PASS
+  StreamingPipelineTest      :  4 tests — PASS  (ArrowIpc export + load round-trip)
+  MemoryLeakVerificationTest :  3 tests — PASS  (103 iterations, 0 bytes leaked)
+  ─────────────────────────────────────────────
+  Subtotal                   : 11 tests — BUILD SUCCESS  (5.6 s)
 
-pgw-ingestor  : 11 tests — BUILD SUCCESS
-pgw-validator :  4 tests — BUILD SUCCESS
-Total         : 15 tests — BUILD SUCCESS  (01:47 min)
+══════════════════════════════════════════════════════════════
+  pgw-validator
+══════════════════════════════════════════════════════════════
+  ValidationTest             :  2 tests — PASS  (Type D passes, Type E fails correctly)
+  ArrowFileLoadBenchmarkTest :  1 test  — PASS  (1M rows loaded in 588–1,176 ms)
+  ValidationBenchmarkTest    :  1 test  — PASS  (load 2,378 ms + validate 497 ms)
+  ─────────────────────────────────────────────
+  Subtotal                   :  4 tests — BUILD SUCCESS  (01:41 min)
+
+══════════════════════════════════════════════════════════════
+  TOTAL                      : 15 tests — BUILD SUCCESS  (01:47 min)
+══════════════════════════════════════════════════════════════
 ```
+
 

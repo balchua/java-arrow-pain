@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pgw</groupId>
+        <artifactId>pain001-arrow-loader</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>pgw-validator</artifactId>
+    <packaging>jar</packaging>
+
+    <name>PGW Validator — ISO 20022 pain.001 Domain Validation</name>
+    <description>
+        Validation domain layer and SQL-based validation pipeline for ISO 20022 pain.001 data
+        loaded by pgw-ingestor. Contains pure-Java domain value objects (IBAN, BIC, Amount,
+        Currency, ControlSum), domain exceptions, chainable SQL validators, and the application
+        entry point.
+    </description>
+
+    <dependencies>
+        <!-- Ingestor module — provides Arrow tables, DAL, and ingestion domain models -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Logging API (transitive from pgw-ingestor but declared explicitly) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- JUnit 5 — test scope only -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- pgw-ingestor test-jar — provides TestFileGenerator, TestPainFileSpecs -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.pgw.App</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.pgw.App</mainClass>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g</argLine>
+                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

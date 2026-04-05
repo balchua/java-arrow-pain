@@ -1,79 +1,77 @@
 #!/bin/bash
 #
 # run_validation_tests.sh
-# 
-# Standardized test script for comparing validation framework performance
-# Run this script before and after making changes to establish baselines
 #
+# Standardized test script for running and comparing validation framework
+# performance across code changes.
+#
+# Usage:
+#   ./run_validation_tests.sh
+#
+# Results are saved to test-results/test_run_YYYYMMDD_HHMMSS.log
 
 set -e
 
-# Configuration
-JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64
+# ── Java 25 is required for virtual threads + records ─────────────────────────
+JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64
 export JAVA_HOME
 export PATH=$JAVA_HOME/bin:$PATH
 
-# Output directory
+# ── Output directory ──────────────────────────────────────────────────────────
 TEST_OUTPUT_DIR="test-results"
 mkdir -p "$TEST_OUTPUT_DIR"
 
-# Timestamp for this test run
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_FILE="$TEST_OUTPUT_DIR/test_run_$TIMESTAMP.log"
 
 echo "═══════════════════════════════════════════════════════════════"
-echo "  ISO 20022 Validation Framework Test Suite"
+echo "  PGW — ISO 20022 pain.001 Validation Test Suite"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
-echo "Test Timestamp: $TIMESTAMP"
-echo "Output File: $OUTPUT_FILE"
-echo "Java Version:"
-java -version 2>&1 | head -3
+echo "  Timestamp  : $TIMESTAMP"
+echo "  Output     : $OUTPUT_FILE"
+echo "  Java       : $(java -version 2>&1 | head -1)"
 echo ""
-echo "═══════════════════════════════════════════════════════════════"
-echo ""
-
-# Clean and compile
-echo "Step 1: Clean and compile..."
-mvn clean compile 2>&1 | tail -5
-
-echo ""
-echo "Step 2: Running test suite..."
-echo ""
-
-# Run the full test suite and capture output
-mvn exec:java -Dexec.mainClass="com.iso20022.pain.App" 2>&1 | tee "$OUTPUT_FILE"
-
-echo ""
-echo "═══════════════════════════════════════════════════════════════"
-echo "  Test Results Summary"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# Extract and display validation times
+# ── Step 1: compile ───────────────────────────────────────────────────────────
+echo "Step 1: Clean and compile all modules..."
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn clean compile -pl pgw-ingestor,pgw-validator --also-make 2>&1 | tail -5
+
+echo ""
+echo "Step 2: Running full test suite (pgw-ingestor + pgw-validator)..."
+echo ""
+
+# ── Step 2: run tests, tee output ─────────────────────────────────────────────
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+  mvn test -pl pgw-ingestor,pgw-validator 2>&1 | tee "$OUTPUT_FILE"
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  Summary"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
 echo "Validation Times:"
-echo "─────────────────"
-grep "Validation.*ms" "$OUTPUT_FILE" | sed 's/.*║/  -/' || echo "  (No validation times found)"
+grep "Validation completed in" "$OUTPUT_FILE" | \
+  sort -u | sed 's/.*INFO.*- /  /' || echo "  (none found)"
 
 echo ""
-echo "Validation Execution Mode:"
-echo "──────────────────────────"
-grep "Executing.*validator" "$OUTPUT_FILE" | sed 's/.*INFO.*- /  - /' || echo "  (No execution mode found)"
+echo "Test Results:"
+grep "Tests run:" "$OUTPUT_FILE" | sed 's/\[INFO\] /  /' || echo "  (none found)"
 
 echo ""
-echo "Validation Results:"
-echo "───────────────────"
-grep "All validations passed\|Validation failed" "$OUTPUT_FILE" | sed 's/.*INFO.*- /  - /' || echo "  (No validation results found)"
+echo "Build:"
+grep "BUILD " "$OUTPUT_FILE" | tail -1 | sed 's/\[INFO\] /  /'
 
 echo ""
-echo "═══════════════════════════════════════════════════════════════"
+echo "✓ Full output saved to: $OUTPUT_FILE"
 echo ""
-echo "✓ Test complete! Full output saved to: $OUTPUT_FILE"
-echo ""
-echo "To compare with previous run:"
-echo "  diff -u $TEST_OUTPUT_DIR/test_run_PREVIOUS.log $OUTPUT_FILE"
-echo ""
-echo "To extract benchmark data:"
-echo "  grep -A 30 'BENCHMARK:' $OUTPUT_FILE"
+echo "Compare with a previous run:"
+echo "  diff -u $TEST_OUTPUT_DIR/test_run_<PREV>.log $OUTPUT_FILE"
+echo "Extract benchmark tables:"
+echo "  grep -A 20 'BENCHMARK:' $OUTPUT_FILE"
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

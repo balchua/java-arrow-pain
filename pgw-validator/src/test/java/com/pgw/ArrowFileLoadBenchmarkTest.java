@@ -51,6 +51,7 @@ class ArrowFileLoadBenchmarkTest {
             long remittanceFileBytes,
             long transactionFileBytes,
             long loadTimeMs,
+            long peakOffHeapBytes,
             long remittanceRows,
             long transactionRows
     ) {
@@ -126,9 +127,10 @@ class ArrowFileLoadBenchmarkTest {
         long remittanceRows;
         long transactionRows;
         long loadTimeMs;
+        long peakOffHeap;
 
         long start = System.currentTimeMillis();
-        try (BufferAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
+        try (RootAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection loadConn = DuckDbFactory.newConnection();
             try (var stmt = loadConn.createStatement()) {
                 stmt.execute("SET memory_limit='1GB'");
@@ -138,13 +140,14 @@ class ArrowFileLoadBenchmarkTest {
             ArrowIpc.load(loadConn, "transactions", txFile,  loadAllocator);
             try (PaymentRepository repo = new PaymentRepositoryImpl(loadConn)) {
                 loadTimeMs      = System.currentTimeMillis() - start;
+                peakOffHeap     = loadAllocator.getPeakMemoryAllocation();
                 remittanceRows  = repo.getRemittanceCount();
                 transactionRows = repo.getTransactionCount();
             }
         }
 
         return new BenchmarkResult(spec.name(), msgBytes, rmtBytes, txBytes,
-                loadTimeMs, remittanceRows, transactionRows);
+                loadTimeMs, peakOffHeap, remittanceRows, transactionRows);
     }
 
     // -------------------------------------------------------------------------
@@ -153,28 +156,31 @@ class ArrowFileLoadBenchmarkTest {
 
     private static void printBenchmarkReport(List<BenchmarkResult> results) {
         final String LINE =
-            "╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦══════════════╦═════════════╣";
+            "╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦════════════════╦══════════════╦═════════════╣";
         System.out.println();
-        System.out.println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        System.out.println("║           Arrow File -> DuckDB Load Benchmark - All Types (Downstream Consumer Simulation)               ║");
+        System.out.println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║           Arrow File -> DuckDB Load Benchmark - All Types (Downstream Consumer Simulation)                                   ║");
         System.out.println(LINE.replace('╠', '╠').replace('╣', '╣'));
-        System.out.println("║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║  Rows/sec    ║  Tx Rows    ║");
+        System.out.println("║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║ Peak Off-Heap  ║  Rows/sec    ║  Tx Rows    ║");
         System.out.println(LINE.replace('╦', '╬'));
         for (BenchmarkResult r : results) {
             long totalRows  = r.remittanceRows() + r.transactionRows();
             long rowsPerSec = r.loadTimeMs() > 0
                     ? (totalRows * 1000 / r.loadTimeMs()) : totalRows * 1000;
-            System.out.printf("║  %-8s ║ %9s ║ %9s ║ %10s ║ %9s ║ %10s ║ %12s ║ %11s ║%n",
+            System.out.printf("║  %-8s ║ %9s ║ %9s ║ %10s ║ %9s ║ %10s ║ %14s ║ %12s ║ %11s ║%n",
                     typeLabel(r.label()),
                     kb(r.messageFileBytes()),
                     kb(r.remittanceFileBytes()),
                     kb(r.transactionFileBytes()),
                     kb(r.totalArrowBytes()),
                     String.format("%,d", r.loadTimeMs()),
+                    String.format("%,d", r.peakOffHeapBytes()),
                     String.format("%,d", rowsPerSec),
                     String.format("%,d", r.transactionRows()));
         }
-        System.out.println("╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩══════════════╩═════════════╝");
+        System.out.println("╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩════════════════╩══════════════╩═════════════╝");
+        System.out.println();
+        System.out.println("  Peak Off-Heap = Arrow allocator off-heap bytes after loading all 3 tables into DuckDB");
         System.out.println();
     }
 

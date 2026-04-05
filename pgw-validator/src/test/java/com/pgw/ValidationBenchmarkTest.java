@@ -61,6 +61,7 @@ class ValidationBenchmarkTest {
             long transactionRows,
             long duckdbLoadMs,
             long sqlValidationMs,
+            long peakOffHeapBytes,
             boolean passed,
             int errorCount
     ) {}
@@ -115,11 +116,12 @@ class ValidationBenchmarkTest {
         long transactionRows;
         long duckdbLoadMs;
         long sqlValidationMs;
+        long peakOffHeap;
         boolean passed;
         int errorCount;
 
         long duckdbStart = System.currentTimeMillis();
-        try (BufferAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
+        try (RootAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection loadConn = DuckDbFactory.newConnection();
             try (var stmt = loadConn.createStatement()) {
                 stmt.execute("SET memory_limit='1GB'");
@@ -131,6 +133,7 @@ class ValidationBenchmarkTest {
             // Step 3: Time DuckDB load and SQL validation
             try (PaymentRepository repository = new PaymentRepositoryImpl(loadConn)) {
                 duckdbLoadMs = System.currentTimeMillis() - duckdbStart;
+                peakOffHeap  = loadAllocator.getPeakMemoryAllocation();
 
                 remittanceRows  = repository.getRemittanceCount();
                 transactionRows = repository.getTransactionCount();
@@ -149,7 +152,7 @@ class ValidationBenchmarkTest {
                 spec.name().replaceAll("\\s*\\(.*", "").trim(),
                 totalArrowBytes,
                 remittanceRows, transactionRows,
-                duckdbLoadMs, sqlValidationMs,
+                duckdbLoadMs, sqlValidationMs, peakOffHeap,
                 passed, errorCount);
     }
 
@@ -180,17 +183,18 @@ class ValidationBenchmarkTest {
 
     private static void printReport(List<ValidationResult> results) {
         final String SEP =
-            "╠══════════╦════════════╦══════════════╦══════════════╦═══════════╦══════════════╦═══════════╣";
+            "╠══════════╦════════════╦══════════════╦══════════════╦════════════════╦═══════════╦══════════════╦═══════════╣";
         System.out.println();
-        System.out.println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        System.out.println("║         Validation Stage Benchmark — Arrow File → DuckDB Load + SQL Validation                      ║");
+        System.out.println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║         Validation Stage Benchmark — Arrow File → DuckDB Load + SQL Validation                                              ║");
         System.out.println(SEP.replace('╠', '╠').replace('╣', '╣'));
-        System.out.println("║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║  Tx Rows  ║ rows/ms (val)║  Result   ║");
+        System.out.println("║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║ Peak Off-Heap  ║  Tx Rows  ║ rows/ms (val)║  Result   ║");
         System.out.println(SEP.replace('╦', '╬'));
         long totalDuckdbMs   = 0;
         long totalValidateMs = 0;
         long totalTxRows     = 0;
         long totalArrowKb    = 0;
+        long maxPeakBytes    = 0;
         for (ValidationResult r : results) {
             double rowsPerMs = r.sqlValidationMs() > 0
                     ? (double) r.transactionRows() / r.sqlValidationMs()
@@ -198,11 +202,12 @@ class ValidationBenchmarkTest {
             String resultStr = r.passed()
                     ? "✓ PASSED"
                     : String.format("✗ %d err", r.errorCount());
-            System.out.printf("║  %-8s ║ %10s ║ %12s ║ %12s ║ %9s ║ %12s ║ %-9s ║%n",
+            System.out.printf("║  %-8s ║ %10s ║ %12s ║ %12s ║ %14s ║ %9s ║ %12s ║ %-9s ║%n",
                     r.label(),
                     String.format("%,d", r.totalArrowBytes() / 1024),
                     String.format("%,d", r.duckdbLoadMs()),
                     String.format("%,d", r.sqlValidationMs()),
+                    String.format("%,d", r.peakOffHeapBytes()),
                     String.format("%,d", r.transactionRows()),
                     String.format("%,.0f", rowsPerMs),
                     resultStr);
@@ -210,23 +215,26 @@ class ValidationBenchmarkTest {
             totalValidateMs += r.sqlValidationMs();
             totalTxRows     += r.transactionRows();
             totalArrowKb    += r.totalArrowBytes() / 1024;
+            if (r.peakOffHeapBytes() > maxPeakBytes) maxPeakBytes = r.peakOffHeapBytes();
         }
-        System.out.println("╠══════════╬════════════╬══════════════╬══════════════╬═══════════╬══════════════╬═══════════╣");
+        System.out.println("╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣");
         double totalRowsPerMs = totalValidateMs > 0
                 ? (double) totalTxRows / totalValidateMs : (double) totalTxRows;
-        System.out.printf("║  %-8s ║ %10s ║ %12s ║ %12s ║ %9s ║ %12s ║ %-9s ║%n",
+        System.out.printf("║  %-8s ║ %10s ║ %12s ║ %12s ║ %14s ║ %9s ║ %12s ║ %-9s ║%n",
                 "TOTAL",
                 String.format("%,d", totalArrowKb),
                 String.format("%,d", totalDuckdbMs),
                 String.format("%,d", totalValidateMs),
+                String.format("%,d", maxPeakBytes),
                 String.format("%,d", totalTxRows),
                 String.format("%,.0f", totalRowsPerMs),
                 "—");
-        System.out.println("╚══════════╩════════════╩══════════════╩══════════════╩═══════════╩══════════════╩═══════════╝");
+        System.out.println("╚══════════╩════════════╩══════════════╩══════════════╩════════════════╩═══════════╩══════════════╩═══════════╝");
         System.out.println();
         System.out.println("  Arrow (KB)     = total size of the three .arrow files on disk (message + remittance + transaction)");
         System.out.println("  DuckDB ms      = time to load Arrow files into in-process DuckDB via ArrowIpc.load (C Data Interface)");
         System.out.println("  Validate ms    = time to run ValidationPipeline.standard() against the populated DuckDB tables");
+        System.out.println("  Peak Off-Heap  = Arrow allocator off-heap bytes after loading all 3 tables into DuckDB");
         System.out.println("  rows/ms (val)  = transaction row scan throughput during validation");
         System.out.println();
     }

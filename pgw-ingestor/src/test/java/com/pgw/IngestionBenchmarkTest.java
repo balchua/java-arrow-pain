@@ -112,7 +112,7 @@ class IngestionBenchmarkTest {
         long parseAndInsertMs;
         long arrowExportMs;
 
-        try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
+        try (RootAllocator allocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection conn = DuckDbFactory.newConnection();
             try (var stmt = conn.createStatement()) {
                 stmt.execute("SET memory_limit='1GB'");

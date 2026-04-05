@@ -163,9 +163,8 @@ This benchmark run reflects the restructured codebase:
 |--------|--------|-------|
 | Build | Single Maven module | Multi-module: `pgw-ingestor` + `pgw-validator` |
 | Package root | `com.iso20022.pain` | `com.pgw` |
-| Domain location | Single module | Each module owns its domain layer |
-| `pgw-ingestor` domain | — | `com.pgw.domain.model.*` (ingestion DTOs) |
-| `pgw-validator` domain | — | `com.pgw.domain.{valueobject,exception,service}.*` |
+| `pgw-ingestor` | — | Pure ingestion pipeline: Arrow schema, StAX parser, DuckDB loader, persistence. No domain objects. |
+| `pgw-validator` domain | — | ALL domain: `com.pgw.domain.model.*` (read-model DTOs) + `valueobject.*` + `exception.*` + `service.*` + `dal.*` |
 | Test count | 15 | 15 (all preserved, all passing) |
 
 Performance is unchanged by the refactor — the runtime code is identical.

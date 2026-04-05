@@ -29,15 +29,16 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
 
 ```
 pain001-arrow-loader/           ← parent POM (com.pgw:pain001-arrow-loader)
-├── pgw-ingestor/               ← XML → Arrow → DuckDB ingestion pipeline
-└── pgw-validator/              ← domain validation + application entry point
+├── pgw-ingestor/               ← pure XML → Arrow → DuckDB pipeline (no domain)
+└── pgw-validator/              ← all domain (model + VOs + DAL) + validation + App
 ```
 
 ### `pgw-ingestor` — Ingestion Pipeline
 
-Owns the ingestion concern: StAX XML parsing, Apache Arrow schema, DuckDB loading, and
-Arrow IPC Stream persistence. Also owns the ingestion domain models (`Message`, `Remittance`,
-`Transaction`) and the `PaymentRepository` DAL interface.
+Owns the ingestion concern only: StAX XML parsing, Apache Arrow schema definition,
+DuckDB live-INSERT via Arrow C Data Interface, and Arrow IPC Stream persistence.
+Contains **no domain objects** — its only output is Arrow IPC Stream files and a
+populated DuckDB connection.
 
 ```
 pgw-ingestor/src/main/java/com/pgw/
@@ -46,14 +47,6 @@ pgw-ingestor/src/main/java/com/pgw/
 │   └── ArrowBatchResult.java         # Legacy batch holder (used by --legacy path only)
 ├── benchmark/
 │   └── LoadBenchmark.java            # Timing, memory tracking, formatted report
-├── dal/
-│   ├── PaymentRepository.java        # Interface: streaming SQL access to message/remittance/transaction
-│   └── PaymentRepositoryImpl.java    # DuckDB implementation (zero-copy Arrow C Data Interface)
-├── domain/model/                     # Ingestion domain — Arrow/DuckDB DTOs
-│   ├── Message.java
-│   ├── Remittance.java
-│   ├── Transaction.java
-│   └── PaymentMethod.java
 ├── generator/
 │   └── PainFileSpec.java             # Data record: file spec (name, counts, invalidControlSum flag)
 ├── parser/
@@ -69,30 +62,37 @@ pgw-ingestor/src/main/java/com/pgw/
     └── PersistenceServiceFactory.java    # Creates service from env vars
 ```
 
-### `pgw-validator` — Validation Domain + Application
+### `pgw-validator` — Full Domain + DAL + Validation + Application
 
-Owns the validation concern: pure-Java domain value objects (IBAN MOD-97, SWIFT BIC,
-Amount, Currency, ControlSum), domain exceptions, chainable domain services, SQL-based
-validators backed by `PaymentRepository`, and the `App` entry point.
-Depends on `pgw-ingestor`.
+Owns **all domain concerns**: ingestion read-model DTOs, validation value objects and
+exceptions, domain validators, the DuckDB-backed repository (DAL), the chainable SQL
+validation pipeline, and the `App` entry point. Depends on `pgw-ingestor`.
 
 ```
 pgw-validator/src/main/java/com/pgw/
 ├── App.java                              # Entry point — requires an existing pain.001 XML file path
+├── dal/
+│   ├── PaymentRepository.java        # Interface: streaming SQL access to message/remittance/transaction
+│   └── PaymentRepositoryImpl.java    # DuckDB implementation (zero-copy Arrow C Data Interface)
 ├── domain/
-│   ├── exception/                        # Validation domain — typed exceptions
+│   ├── model/                            # Read-model DTOs hydrated from DuckDB by the DAL
+│   │   ├── Message.java                  # GroupHeader — messageId, creationDateTime, controlSum, initiatingParty
+│   │   ├── Remittance.java               # PaymentInformation — remittanceId, debtor, executionDate, controlSum
+│   │   ├── Transaction.java              # CreditTransferTransaction — amounts, currency, creditor info
+│   │   └── PaymentMethod.java            # Enum: TRF, CHK
+│   ├── exception/                        # Typed validation exceptions
 │   │   ├── InvalidIbanException.java
 │   │   ├── InvalidBicException.java
 │   │   ├── InvalidAmountException.java
 │   │   ├── InvalidCurrencyException.java
 │   │   └── InvalidControlSumException.java
-│   ├── valueobject/                      # Validation domain — VOs with invariants
+│   ├── valueobject/                      # VOs with enforced invariants
 │   │   ├── Iban.java                     # MOD-97 checksum (ISO 13616-1)
 │   │   ├── Bic.java                      # SWIFT regex ^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$
 │   │   ├── Amount.java                   # value > 0; carries Currency; add() guards same-currency
 │   │   ├── Currency.java                 # ISO 4217 [A-Z]{3}
 │   │   └── ControlSum.java               # value ≥ 0; scaled to 2dp; epsilon-safe matches()
-│   └── service/                          # Validation domain — pure-Java domain validators
+│   └── service/                          # Pure-Java domain validators
 │       ├── MessageDomainValidator.java   # messageId ≤ 35, initiatingParty non-blank, CreDtTm ISO 8601
 │       ├── RemittanceDomainValidator.java # debtor Iban MOD-97, debtor Bic SWIFT, executionDate non-null
 │       ├── TransactionDomainValidator.java # Amount+Currency VOs, creditor Iban+Bic, creditor name non-blank

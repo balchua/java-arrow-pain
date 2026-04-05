@@ -1,7 +1,5 @@
 package com.pgw;
 
-import com.pgw.arrow.ArrowBatchResult;
-import com.pgw.arrow.Pain001ArrowSchema;
 import com.pgw.dal.PaymentRepository;
 import com.pgw.dal.PaymentRepositoryImpl;
 import com.pgw.generator.PainFileSpec;
@@ -10,19 +8,14 @@ import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.parser.PainParser;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
-import com.pgw.persistence.LocalFilePersistenceService;
 import com.pgw.validation.ValidationContext;
 import com.pgw.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.ipc.ArrowStreamReader;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -37,20 +30,19 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Each run separates two distinct phases:
  * <ol>
- *   <li><b>DuckDB registration</b> — time to register pre-exported Arrow IPC Stream
- *       files into an in-process DuckDB database (zero-copy via Arrow C Data Interface)</li>
+ *   <li><b>DuckDB registration</b> — time to load pre-exported Arrow files into an
+ *       in-process DuckDB database via {@code read_arrow()}</li>
  *   <li><b>SQL validation</b> — time to run the full {@link ValidationPipeline} against
  *       the populated DuckDB tables (IBAN MOD-97, BIC, ControlSum, …)</li>
  * </ol>
  *
- * <p>Arrow IPC Stream files are generated on demand if absent (same output directory
- * used by {@code ArrowFileLoadBenchmarkTest} and {@code FullPipelineBenchmarkTest}).
+ * <p>Arrow files are generated on demand if absent (XML → DuckDB → COPY TO (FORMAT arrow)).
  * The DuckDB load metrics here are specifically in the context of validation, giving
  * you the full latency picture for the validator module:</p>
  *
  * <pre>
- *   .arrows files on disk
- *        ↓  [DuckDB registration time]
+ *   .arrow files on disk
+ *        ↓  [DuckDB read_arrow() time]
  *   in-process DuckDB
  *        ↓  [SQL validation time]
  *   ValidationContext (errors / warnings)
@@ -104,128 +96,92 @@ class ValidationBenchmarkTest {
 
     private ValidationResult runValidation(PainFileSpec spec, long allocatorLimit)
             throws Exception {
-        // Step 1: Ensure Arrow IPC Stream files exist (generate XML + parse if absent)
+        // Step 1: Ensure Arrow files exist (generate XML + parse + COPY TO if absent)
         Path xmlFile = TestFileGenerator.generateIfAbsent(spec);
         Files.createDirectories(OUTPUT_DIR);
 
         String base = spec.fileName().replaceAll("\\.[xX][mM][lL]$", "");
-        Path msgFile = OUTPUT_DIR.resolve(base + "_message.arrows");
-        Path rmtFile = OUTPUT_DIR.resolve(base + "_remittance.arrows");
-        Path txFile  = OUTPUT_DIR.resolve(base + "_transaction.arrows");
+        Path msgFile = OUTPUT_DIR.resolve(base + "_message.arrow");
+        Path rmtFile = OUTPUT_DIR.resolve(base + "_remittance.arrow");
+        Path txFile  = OUTPUT_DIR.resolve(base + "_transaction.arrow");
 
         if (!Files.exists(msgFile) || !Files.exists(rmtFile) || !Files.exists(txFile)) {
-            generateArrowFiles(spec, xmlFile, base, allocatorLimit);
+            generateArrowFiles(xmlFile, base, allocatorLimit);
         }
 
         long totalArrowBytes = Files.size(msgFile) + Files.size(rmtFile) + Files.size(txFile);
 
-        // Step 2: Read Arrow IPC Stream files from disk
-        try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
+        // Step 2: Load Arrow files into a fresh DuckDB via read_arrow()
+        long remittanceRows;
+        long transactionRows;
+        long duckdbLoadMs;
+        long sqlValidationMs;
+        boolean passed;
+        int errorCount;
 
-            VectorSchemaRoot           msgRoot    = readArrowFile(msgFile, allocator);
-            List<VectorSchemaRoot> rmtBatches = readArrowFileBatches(rmtFile, allocator);
-            List<VectorSchemaRoot> txBatches  = readArrowFileBatches(txFile, allocator);
-            ArrowBatchResult arrowData = new ArrowBatchResult(msgRoot, rmtBatches, txBatches);
-
-            long remittanceRows;
-            long transactionRows;
-            long duckdbLoadMs;
-            long sqlValidationMs;
-            boolean passed;
-            int errorCount;
-
-            // Step 3: Time DuckDB registration from Arrow IPC Stream files
-            long duckdbStart = System.currentTimeMillis();
-            try (PaymentRepository repository = new PaymentRepositoryImpl(arrowData, allocator)) {
-                duckdbLoadMs = System.currentTimeMillis() - duckdbStart;
-
-                remittanceRows  = repository.getRemittanceCount();
-                transactionRows = repository.getTransactionCount();
-
-                // Step 4: Time SQL validation against the loaded DuckDB
-                long valStart = System.nanoTime();
-                ValidationContext ctx = ValidationPipeline.standard().execute(repository);
-                sqlValidationMs = (System.nanoTime() - valStart) / 1_000_000L;
-
-                passed     = !ctx.hasErrors();
-                errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
-            }
-
-            arrowData.close();
-            return new ValidationResult(
-                    spec.name().replaceAll("\\s*\\(.*", "").trim(),
-                    totalArrowBytes,
-                    remittanceRows, transactionRows,
-                    duckdbLoadMs, sqlValidationMs,
-                    passed, errorCount);
+        long duckdbStart = System.currentTimeMillis();
+        DuckDBConnection loadConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+        try (var stmt = loadConn.createStatement()) {
+            stmt.execute("SET memory_limit='1GB'");
+            stmt.execute("CREATE TABLE message AS SELECT * FROM read_arrow('"
+                    + msgFile.toAbsolutePath() + "')");
+            stmt.execute("CREATE TABLE remittance AS SELECT * FROM read_arrow('"
+                    + rmtFile.toAbsolutePath() + "')");
+            stmt.execute("CREATE TABLE transactions AS SELECT * FROM read_arrow('"
+                    + txFile.toAbsolutePath() + "')");
         }
+
+        // Step 3: Time DuckDB load and SQL validation
+        try (PaymentRepository repository = new PaymentRepositoryImpl(loadConn)) {
+            duckdbLoadMs = System.currentTimeMillis() - duckdbStart;
+
+            remittanceRows  = repository.getRemittanceCount();
+            transactionRows = repository.getTransactionCount();
+
+            // Step 4: Time SQL validation against the loaded DuckDB
+            long valStart = System.nanoTime();
+            ValidationContext ctx = ValidationPipeline.standard().execute(repository);
+            sqlValidationMs = (System.nanoTime() - valStart) / 1_000_000L;
+
+            passed     = !ctx.hasErrors();
+            errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+        }
+
+        return new ValidationResult(
+                spec.name().replaceAll("\\s*\\(.*", "").trim(),
+                totalArrowBytes,
+                remittanceRows, transactionRows,
+                duckdbLoadMs, sqlValidationMs,
+                passed, errorCount);
     }
 
     // -------------------------------------------------------------------------
-    // Arrow IPC Stream file generation (if not already present)
+    // Arrow file generation (XML → DuckDB → COPY TO (FORMAT arrow))
     // -------------------------------------------------------------------------
 
-    private void generateArrowFiles(PainFileSpec spec, Path xmlFile,
-            String base, long allocatorLimit) throws Exception {
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
+    private void generateArrowFiles(Path xmlFile, String base, long allocatorLimit)
+            throws Exception {
         try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
             DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
             try (var stmt = conn.createStatement()) {
                 stmt.execute("SET memory_limit='1GB'");
             }
-            LocalFilePersistenceService persistence = new LocalFilePersistenceService(
-                    OUTPUT_DIR, base, msgSchema, rmtSchema, txSchema);
-            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, persistence, allocator);
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             PainParser parser = new PainParserImpl();
             parser.parseStreaming(xmlFile, allocator, consumer);
-            persistence.finish();
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("COPY message TO '"
+                        + OUTPUT_DIR.resolve(base + "_message.arrow").toAbsolutePath()
+                        + "' (FORMAT arrow)");
+                stmt.execute("COPY remittance TO '"
+                        + OUTPUT_DIR.resolve(base + "_remittance.arrow").toAbsolutePath()
+                        + "' (FORMAT arrow)");
+                stmt.execute("COPY transactions TO '"
+                        + OUTPUT_DIR.resolve(base + "_transaction.arrow").toAbsolutePath()
+                        + "' (FORMAT arrow)");
+            }
             conn.close();
         }
-    }
-
-    // -------------------------------------------------------------------------
-    // Arrow IPC Stream readers
-    // -------------------------------------------------------------------------
-
-    private static VectorSchemaRoot readArrowFile(Path file, BufferAllocator allocator)
-            throws Exception {
-        try (FileInputStream fis = new FileInputStream(file.toFile());
-             ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
-            reader.loadNextBatch();
-            VectorSchemaRoot root = reader.getVectorSchemaRoot();
-            VectorSchemaRoot copy = VectorSchemaRoot.create(root.getSchema(), allocator);
-            copy.allocateNew();
-            for (int i = 0; i < root.getFieldVectors().size(); i++) {
-                root.getFieldVectors().get(i)
-                    .makeTransferPair(copy.getFieldVectors().get(i)).transfer();
-            }
-            copy.setRowCount(root.getRowCount());
-            return copy;
-        }
-    }
-
-    private static List<VectorSchemaRoot> readArrowFileBatches(Path file,
-            BufferAllocator allocator) throws Exception {
-        List<VectorSchemaRoot> batches = new ArrayList<>();
-        try (FileInputStream fis = new FileInputStream(file.toFile());
-             ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
-            while (reader.loadNextBatch()) {
-                VectorSchemaRoot root = reader.getVectorSchemaRoot();
-                if (root.getRowCount() == 0) continue;
-                VectorSchemaRoot copy = VectorSchemaRoot.create(root.getSchema(), allocator);
-                copy.allocateNew();
-                for (int i = 0; i < root.getFieldVectors().size(); i++) {
-                    root.getFieldVectors().get(i)
-                        .makeTransferPair(copy.getFieldVectors().get(i)).transfer();
-                }
-                copy.setRowCount(root.getRowCount());
-                batches.add(copy);
-            }
-        }
-        return batches;
     }
 
     // -------------------------------------------------------------------------
@@ -237,7 +193,7 @@ class ValidationBenchmarkTest {
             "╠══════════╦════════════╦══════════════╦══════════════╦═══════════╦══════════════╦═══════════╣";
         System.out.println();
         System.out.println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        System.out.println("║         Validation Stage Benchmark — Arrow IPC → DuckDB Registration + SQL Validation               ║");
+        System.out.println("║         Validation Stage Benchmark — Arrow File → DuckDB Load + SQL Validation                      ║");
         System.out.println(SEP.replace('╠', '╠').replace('╣', '╣'));
         System.out.println("║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║  Tx Rows  ║ rows/ms (val)║  Result   ║");
         System.out.println(SEP.replace('╦', '╬'));
@@ -278,8 +234,8 @@ class ValidationBenchmarkTest {
                 "—");
         System.out.println("╚══════════╩════════════╩══════════════╩══════════════╩═══════════╩══════════════╩═══════════╝");
         System.out.println();
-        System.out.println("  Arrow (KB)     = total size of the three .arrows files on disk (message + remittance + transaction)");
-        System.out.println("  DuckDB ms      = time to register Arrow IPC Stream files into in-process DuckDB (zero-copy ABI)");
+        System.out.println("  Arrow (KB)     = total size of the three .arrow files on disk (message + remittance + transaction)");
+        System.out.println("  DuckDB ms      = time to load Arrow files into in-process DuckDB via read_arrow()");
         System.out.println("  Validate ms    = time to run ValidationPipeline.standard() against the populated DuckDB tables");
         System.out.println("  rows/ms (val)  = transaction row scan throughput during validation");
         System.out.println();

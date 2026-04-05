@@ -1,20 +1,9 @@
 package com.pgw.dal;
 
-import com.pgw.arrow.ArrowBatchResult;
-import org.apache.arrow.c.ArrowArrayStream;
-import org.apache.arrow.c.Data;
-import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.VectorLoader;
-import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.VectorUnloader;
-import org.apache.arrow.vector.ipc.ArrowReader;
-import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.util.ArrayList;
@@ -23,163 +12,25 @@ import java.util.List;
 /**
  * DuckDB-backed implementation of {@link PaymentRepository}.
  *
- * <p>
- * Arrow data is loaded using DuckDB's zero-copy
- * {@link DuckDBConnection#registerArrowStream} API backed by a custom
- * {@link BatchArrowReader} that serves existing {@link VectorSchemaRoot}
- * batches directly via the Arrow C Data Interface.
- * </p>
+ * <p>Wraps a pre-populated {@link DuckDBConnection} whose {@code message},
+ * {@code remittance}, and {@code transactions} tables have already been loaded
+ * by the streaming ingestor pipeline.</p>
  */
 public final class PaymentRepositoryImpl implements PaymentRepository {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaymentRepositoryImpl.class);
 
-    /** DuckDB memory budget. */
-    private static final String DUCKDB_MEMORY_LIMIT = "1GB";
-
     private final DuckDBConnection conn;
-    private final BufferAllocator allocator;
-    /** Arrow C Data Interface resources held open until after conn.close(). */
-    private final List<AutoCloseable> deferredCloseables = new ArrayList<>();
 
     /**
-     * Opens an in-process DuckDB database and loads the Arrow batch result into
-     * three tables: {@code message}, {@code remittance}, and {@code transactions}.
-     *
-     * @param result    the parsed Arrow batch result
-     * @param allocator the Arrow buffer allocator (same root as the batch allocators)
-     * @throws Exception if DuckDB cannot be opened or data cannot be loaded
-     */
-    public PaymentRepositoryImpl(ArrowBatchResult result, BufferAllocator allocator) throws Exception {
-        this.allocator = allocator;
-        this.conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
-        try (var stmt = conn.createStatement()) {
-            stmt.execute("SET memory_limit='" + DUCKDB_MEMORY_LIMIT + "'");
-        }
-
-        loadViaStream("message",      List.of(result.getMessageRoot()));
-        loadViaStream("remittance",   result.getRemittanceBatches());
-        loadViaStream("transactions", result.getTransactionBatches());
-
-        LOG.debug("PaymentRepositoryImpl loaded: {} message, {} remittance, {} transaction rows",
-                result.getMessageRowCount(), result.getRemittanceRowCount(),
-                result.getTransactionRowCount());
-    }
-
-    /**
-     * Connects to a pre-populated DuckDB instance. No data loading occurs.
-     * Used by the streaming pipeline where tables are populated live during parsing.
+     * Wraps a pre-populated DuckDB connection. No data loading occurs.
+     * Used by the streaming pipeline (tables populated live during parsing)
+     * and by the benchmark tests (tables loaded via {@code read_arrow()}).
      *
      * @param conn a DuckDB connection whose tables are already populated
      */
     public PaymentRepositoryImpl(DuckDBConnection conn) {
         this.conn = conn;
-        this.allocator = null;
-    }
-
-    private void loadViaStream(String tableName, List<VectorSchemaRoot> batches)
-            throws Exception {
-
-        // Reader and stream are intentionally NOT closed here.
-        // DuckDB's registerArrowStream transfers C Data Interface ownership of the
-        // stream struct to DuckDB. The release callback (which frees Arrow allocator
-        // memory) is only invoked when DuckDB drops the scan — i.e. during conn.close().
-        // Closing them before conn.close() would free memory DuckDB still needs.
-        // They are stored in deferredCloseables and closed in close() after conn.close().
-        BatchArrowReader reader = new BatchArrowReader(batches, allocator);
-        ArrowArrayStream stream = ArrowArrayStream.allocateNew(allocator);
-        try {
-            Data.exportArrayStream(allocator, reader, stream);
-
-            String tmpName = "_tmp_" + tableName;
-            conn.registerArrowStream(tmpName, stream);
-            try (var stmt = conn.createStatement()) {
-                stmt.execute("CREATE TABLE " + tableName + " AS SELECT * FROM " + tmpName);
-            }
-            deferredCloseables.add(stream);
-            deferredCloseables.add(reader);
-        } catch (Exception e) {
-            // Export or registration failed — DuckDB never took ownership, close now.
-            closeSilently(stream);
-            closeSilently(reader);
-            throw e;
-        }
-
-        LOG.debug("Loaded '{}': {} batch(es) via direct-batch Arrow stream", tableName, batches.size());
-    }
-
-    private static void closeSilently(AutoCloseable c) {
-        try {
-            c.close();
-        } catch (Exception e) {
-            LOG.warn("Error closing Arrow resource: {}", e.getMessage());
-        }
-    }
-
-    private static final class BatchArrowReader extends ArrowReader {
-
-        private final List<VectorSchemaRoot> batches;
-        private final VectorSchemaRoot sharedRoot;
-        private int nextIndex = 0;
-        private long totalBytesRead = 0L;
-        private boolean closed = false;
-
-        BatchArrowReader(List<VectorSchemaRoot> batches, BufferAllocator allocator) {
-            super(allocator);
-            if (batches.isEmpty()) {
-                throw new IllegalArgumentException("batches list must not be empty");
-            }
-            this.batches = batches;
-            this.sharedRoot = VectorSchemaRoot.create(batches.get(0).getSchema(), allocator);
-        }
-
-        @Override
-        public VectorSchemaRoot getVectorSchemaRoot() {
-            return sharedRoot;
-        }
-
-        @Override
-        protected Schema readSchema() {
-            return batches.get(0).getSchema();
-        }
-
-        @Override
-        public boolean loadNextBatch() throws IOException {
-            if (nextIndex >= batches.size()) {
-                return false;
-            }
-            VectorSchemaRoot src = batches.get(nextIndex++);
-            try (ArrowRecordBatch rb = new VectorUnloader(src).getRecordBatch()) {
-                rb.getBuffers().forEach(buf -> totalBytesRead += buf.capacity());
-                new VectorLoader(sharedRoot).load(rb);
-                sharedRoot.setRowCount(src.getRowCount());
-            } catch (Exception e) {
-                throw new IOException("Failed to load batch " + (nextIndex - 1), e);
-            }
-            return true;
-        }
-
-        @Override
-        public long bytesRead() {
-            return totalBytesRead;
-        }
-
-        /**
-         * Idempotent close — DuckDB's C Data Interface release callback may call this,
-         * and our deferred close in {@link PaymentRepositoryImpl#close()} calls it too.
-         */
-        @Override
-        public synchronized void close() throws IOException {
-            if (!closed) {
-                closed = true;
-                sharedRoot.close();
-            }
-        }
-
-        @Override
-        protected void closeReadSource() throws IOException {
-            // no-op
-        }
     }
 
     @Override
@@ -504,16 +355,7 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
 
     @Override
     public void close() throws Exception {
-        // Close DuckDB connection FIRST — this invokes all C Data Interface release
-        // callbacks synchronously, freeing DuckDB's references to the Arrow stream structs.
         conn.close();
-        // THEN close the Arrow stream objects. The release callbacks have already fired,
-        // so the Arrow allocator can reclaim the memory without conflict.
-        if (allocator != null) {
-            for (AutoCloseable c : deferredCloseables) {
-                closeSilently(c);
-            }
-        }
         LOG.debug("PaymentRepositoryImpl closed");
     }
 }

@@ -1,7 +1,5 @@
 package com.pgw.parser;
 
-import com.pgw.arrow.Pain001ArrowSchema;
-import com.pgw.persistence.PersistenceService;
 import org.apache.arrow.c.ArrowArrayStream;
 import org.apache.arrow.c.Data;
 import org.apache.arrow.memory.BufferAllocator;
@@ -15,18 +13,12 @@ import org.duckdb.DuckDBConnection;
 
 import javax.xml.stream.XMLStreamException;
 import java.io.IOException;
-import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Implements {@link BatchConsumer}. On each {@link #accept} call:
- * <ol>
- * <li>Appends the batch to the live DuckDB table using Arrow C Data Interface.</li>
- * <li>Calls {@link PersistenceService#writeBatch(BatchConsumer.TableType, VectorSchemaRoot)}.</li>
- * </ol>
+ * Implements {@link BatchConsumer}. On each {@link #accept} call, appends the
+ * batch to the live DuckDB table using the Arrow C Data Interface.
  *
  * <p>Does NOT hold any reference to {@code root} after returning.</p>
  *
@@ -38,21 +30,18 @@ public final class StreamingBatchConsumer implements BatchConsumer {
     private static final AtomicLong TMP_SEQ = new AtomicLong(0);
 
     private final DuckDBConnection conn;
-    private final PersistenceService persistenceService;
     private final BufferAllocator allocator;
 
     /**
-     * Creates a StreamingBatchConsumer that writes to DuckDB and the given persistence service.
+     * Creates a StreamingBatchConsumer that writes batches to DuckDB only.
      *
-     * @param conn               a live DuckDB connection (will be populated with three tables)
-     * @param persistenceService the sink for Arrow IPC stream output
-     * @param allocator          Arrow buffer allocator (for C Data Interface operations)
+     * @param conn      a live DuckDB connection (will be populated with three tables)
+     * @param allocator Arrow buffer allocator (for C Data Interface operations)
      * @throws SQLException if the DuckDB tables cannot be created
      */
-    public StreamingBatchConsumer(DuckDBConnection conn, PersistenceService persistenceService,
-            BufferAllocator allocator) throws SQLException {
+    public StreamingBatchConsumer(DuckDBConnection conn, BufferAllocator allocator)
+            throws SQLException {
         this.conn = conn;
-        this.persistenceService = persistenceService;
         this.allocator = allocator;
         createTables();
     }
@@ -109,15 +98,11 @@ public final class StreamingBatchConsumer implements BatchConsumer {
     @Override
     public void accept(TableType tableType, VectorSchemaRoot root)
             throws IOException, XMLStreamException {
-        // 1. Insert batch into DuckDB via Arrow C Data Interface
         try {
             insertIntoDuckDb(tableType, root);
         } catch (Exception e) {
             throw new IOException("Failed to insert batch into DuckDB: " + e.getMessage(), e);
         }
-
-        // 2. Write batch to persistence service
-        persistenceService.writeBatch(tableType, root);
     }
 
     private void insertIntoDuckDb(TableType tableType, VectorSchemaRoot root) throws Exception {

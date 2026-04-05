@@ -1,18 +1,15 @@
 package com.pgw;
 
-import com.pgw.arrow.Pain001ArrowSchema;
 import com.pgw.dal.PaymentRepository;
 import com.pgw.dal.PaymentRepositoryImpl;
 import com.pgw.generator.TestFileGenerator;
 import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
-import com.pgw.persistence.LocalFilePersistenceService;
 import com.pgw.validation.ValidationContext;
 import com.pgw.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,19 +35,10 @@ class ValidationTest {
     void typeDValidationPasses(@TempDir Path tempDir) throws Exception {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
-            try (LocalFilePersistenceService persistence =
-                    new LocalFilePersistenceService(tempDir, "typed", msgSchema, rmtSchema, txSchema)) {
-                StreamingBatchConsumer consumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
-                new PainParserImpl().parseStreaming(file, allocator, consumer);
-                persistence.finish();
-            }
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
+            new PainParserImpl().parseStreaming(file, allocator, consumer);
             try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
                 ValidationContext context = ValidationPipeline.standard().execute(repository);
                 assertFalse(context.hasErrors(),
@@ -65,19 +53,10 @@ class ValidationTest {
     void typeEValidationReportsCtrlSumError(@TempDir Path tempDir) throws Exception {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_E);
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
-            try (LocalFilePersistenceService persistence =
-                    new LocalFilePersistenceService(tempDir, "typee", msgSchema, rmtSchema, txSchema)) {
-                StreamingBatchConsumer consumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
-                new PainParserImpl().parseStreaming(file, allocator, consumer);
-                persistence.finish();
-            }
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
+            new PainParserImpl().parseStreaming(file, allocator, consumer);
             try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
                 ValidationContext context = ValidationPipeline.standard().execute(repository);
                 assertTrue(context.hasErrors(),

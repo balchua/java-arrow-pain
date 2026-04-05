@@ -16,8 +16,8 @@
     <name>PGW Ingestor — ISO 20022 pain.001 → Apache Arrow / DuckDB</name>
     <description>
         StAX streaming parser that reads ISO 20022 pain.001.001.09 XML files and loads them
-        into Apache Arrow columnar tables, persisting via local file or S3 IPC stream output,
-        with a DuckDB-backed repository for downstream SQL access.
+        into Apache Arrow columnar tables, with a single DuckDB sink for downstream SQL access
+        and Arrow file export via COPY TO (FORMAT arrow).
     </description>
 
     <dependencies>
@@ -53,12 +53,6 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
-        </dependency>
-
-        <!-- AWS S3 client — optional, only needed for S3 persistence mode -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>s3</artifactId>
         </dependency>
 
         <!-- JUnit 5 — test scope only -->

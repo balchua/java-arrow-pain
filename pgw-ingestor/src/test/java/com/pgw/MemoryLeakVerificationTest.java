@@ -1,15 +1,12 @@
 package com.pgw;
 
-import com.pgw.arrow.Pain001ArrowSchema;
 import com.pgw.generator.TestFileGenerator;
 import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.parser.PainParser;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
-import com.pgw.persistence.LocalFilePersistenceService;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -64,20 +61,12 @@ class MemoryLeakVerificationTest {
     private static void runStreamingLeakCheck(Path xmlFile, int iterations, String label)
             throws Exception {
 
-        Path outputDir = Paths.get("src", "test", "resources", "output");
-        Files.createDirectories(outputDir);
-
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         long[] parseTimes = new long[iterations];
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             PainParser parser = new PainParserImpl();
 
             for (int i = 0; i < iterations; i++) {
-                String baseName = "leak_check_iter_" + i;
                 long t0 = System.currentTimeMillis();
 
                 DuckDBConnection conn = (DuckDBConnection)
@@ -86,16 +75,8 @@ class MemoryLeakVerificationTest {
                     stmt.execute("SET memory_limit='512MB'");
                 }
 
-                try (LocalFilePersistenceService persistence =
-                        new LocalFilePersistenceService(outputDir, baseName,
-                                msgSchema, rmtSchema, txSchema)) {
-
-                    StreamingBatchConsumer consumer =
-                            new StreamingBatchConsumer(conn, persistence, allocator);
-                    parser.parseStreaming(xmlFile, allocator, consumer);
-                    persistence.finish();
-                }
-
+                StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
+                parser.parseStreaming(xmlFile, allocator, consumer);
                 conn.close();
 
                 parseTimes[i] = System.currentTimeMillis() - t0;

@@ -1,6 +1,5 @@
 package com.pgw;
 
-import com.pgw.arrow.Pain001ArrowSchema;
 import com.pgw.generator.TestFileGenerator;
 import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.parser.BatchConsumer;
@@ -8,26 +7,23 @@ import com.pgw.parser.PainParser;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.ParseStats;
 import com.pgw.parser.StreamingBatchConsumer;
-import com.pgw.persistence.LocalFilePersistenceService;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.ipc.ArrowStreamReader;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for the streaming pipeline: memory footprint, DuckDB row count correctness,
- * .arrows file readability, and output directory configuration.
+ * Arrow file export via DuckDB COPY TO, and output directory configuration.
  */
 class StreamingPipelineTest {
 
@@ -38,34 +34,24 @@ class StreamingPipelineTest {
     void testMemoryFootprintIsFlat(@TempDir Path tempDir) throws Exception {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         long peakOffHeap = 0;
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             DuckDBConnection conn = (DuckDBConnection)
                     DriverManager.getConnection("jdbc:duckdb:");
 
-            try (LocalFilePersistenceService persistence =
-                    new LocalFilePersistenceService(tempDir, "test", msgSchema, rmtSchema, txSchema)) {
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
 
-                StreamingBatchConsumer consumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
+            final long[] peak = {0};
+            BatchConsumer wrapping = (tableType, root) -> {
+                consumer.accept(tableType, root);
+                long current = allocator.getAllocatedMemory();
+                if (current > peak[0]) peak[0] = current;
+            };
 
-                final long[] peak = {0};
-                BatchConsumer wrapping = (tableType, root) -> {
-                    consumer.accept(tableType, root);
-                    long current = allocator.getAllocatedMemory();
-                    if (current > peak[0]) peak[0] = current;
-                };
-
-                PainParser parser = new PainParserImpl();
-                parser.parseStreaming(xmlFile, allocator, wrapping);
-                persistence.finish();
-                peakOffHeap = peak[0];
-            }
+            PainParser parser = new PainParserImpl();
+            parser.parseStreaming(xmlFile, allocator, wrapping);
+            peakOffHeap = peak[0];
             conn.close();
         }
 
@@ -82,24 +68,14 @@ class StreamingPipelineTest {
     void testDuckDbRowCountsMatchParsed(@TempDir Path tempDir) throws Exception {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         ParseStats stats;
         DuckDBConnection conn = (DuckDBConnection)
                 DriverManager.getConnection("jdbc:duckdb:");
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            try (LocalFilePersistenceService persistence =
-                    new LocalFilePersistenceService(tempDir, "test", msgSchema, rmtSchema, txSchema)) {
-
-                StreamingBatchConsumer consumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
-                PainParser parser = new PainParserImpl();
-                stats = parser.parseStreaming(xmlFile, allocator, consumer);
-                persistence.finish();
-            }
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
+            PainParser parser = new PainParserImpl();
+            stats = parser.parseStreaming(xmlFile, allocator, consumer);
         }
 
         long rmtCount, txCount;
@@ -121,101 +97,97 @@ class StreamingPipelineTest {
     }
 
     @Test
-    @DisplayName("Streaming pipeline: .arrows files are readable by ArrowStreamReader")
-    void testArrowStreamFilesReadable(@TempDir Path tempDir) throws Exception {
+    @DisplayName("Streaming pipeline: DuckDB COPY TO exports readable .arrow files")
+    void testArrowFilesExported(@TempDir Path tempDir) throws Exception {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
+        // Parse and populate DuckDB
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             DuckDBConnection conn = (DuckDBConnection)
                     DriverManager.getConnection("jdbc:duckdb:");
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
+            PainParser parser = new PainParserImpl();
+            parser.parseStreaming(xmlFile, allocator, consumer);
 
-            try (LocalFilePersistenceService persistence =
-                    new LocalFilePersistenceService(tempDir, "test", msgSchema, rmtSchema, txSchema)) {
+            // Export Arrow files via DuckDB COPY TO
+            Path msgFile = tempDir.resolve("test_message.arrow");
+            Path rmtFile = tempDir.resolve("test_remittance.arrow");
+            Path txFile  = tempDir.resolve("test_transaction.arrow");
 
-                StreamingBatchConsumer consumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
-                PainParser parser = new PainParserImpl();
-                parser.parseStreaming(xmlFile, allocator, consumer);
-                persistence.finish();
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("COPY message TO '" + msgFile.toAbsolutePath() + "' (FORMAT arrow)");
+                stmt.execute("COPY remittance TO '" + rmtFile.toAbsolutePath() + "' (FORMAT arrow)");
+                stmt.execute("COPY transactions TO '" + txFile.toAbsolutePath() + "' (FORMAT arrow)");
             }
             conn.close();
-        }
 
-        // Verify the three .arrows files exist and are readable
-        Path msgFile = tempDir.resolve("test_message.arrows");
-        Path rmtFile = tempDir.resolve("test_remittance.arrows");
-        Path txFile  = tempDir.resolve("test_transaction.arrows");
+            // Verify files exist and are non-empty
+            assertTrue(Files.exists(msgFile), "message .arrow file must exist");
+            assertTrue(Files.exists(rmtFile), "remittance .arrow file must exist");
+            assertTrue(Files.exists(txFile),  "transaction .arrow file must exist");
+            assertTrue(Files.size(msgFile) > 0, "message .arrow file must not be empty");
+            assertTrue(Files.size(rmtFile) > 0, "remittance .arrow file must not be empty");
+            assertTrue(Files.size(txFile)  > 0, "transaction .arrow file must not be empty");
 
-        assertTrue(Files.exists(msgFile), "message .arrows file must exist");
-        assertTrue(Files.exists(rmtFile), "remittance .arrows file must exist");
-        assertTrue(Files.exists(txFile),  "transaction .arrows file must exist");
-
-        try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            long msgRows = 0;
-            try (FileInputStream fis = new FileInputStream(msgFile.toFile());
-                 ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
-                while (reader.loadNextBatch()) {
-                    msgRows += reader.getVectorSchemaRoot().getRowCount();
-                }
+            // Verify files are loadable with DuckDB read_arrow() and row counts match
+            DuckDBConnection loadConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            try (var stmt = loadConn.createStatement()) {
+                stmt.execute("CREATE TABLE msg AS SELECT * FROM read_arrow('"
+                        + msgFile.toAbsolutePath() + "')");
+                stmt.execute("CREATE TABLE rmt AS SELECT * FROM read_arrow('"
+                        + rmtFile.toAbsolutePath() + "')");
+                stmt.execute("CREATE TABLE txs AS SELECT * FROM read_arrow('"
+                        + txFile.toAbsolutePath() + "')");
             }
-            assertTrue(msgRows > 0, "message file must have at least one row");
-
-            long rmtRows = 0;
-            try (FileInputStream fis = new FileInputStream(rmtFile.toFile());
-                 ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
-                while (reader.loadNextBatch()) {
-                    rmtRows += reader.getVectorSchemaRoot().getRowCount();
-                }
+            try (var stmt = loadConn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM msg")) {
+                assertTrue(rs.next() && rs.getLong(1) > 0, "message file must have at least one row");
             }
-            assertEquals(2L, rmtRows, "Type D: expected 2 remittance rows in .arrows file");
-
-            long txRows = 0;
-            try (FileInputStream fis = new FileInputStream(txFile.toFile());
-                 ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
-                while (reader.loadNextBatch()) {
-                    txRows += reader.getVectorSchemaRoot().getRowCount();
-                }
+            try (var stmt = loadConn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM rmt")) {
+                assertTrue(rs.next());
+                assertEquals(2L, rs.getLong(1), "Type D: expected 2 remittance rows");
             }
-            assertEquals(200L, txRows, "Type D: expected 200 transaction rows in .arrows file");
+            try (var stmt = loadConn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM txs")) {
+                assertTrue(rs.next());
+                assertEquals(200L, rs.getLong(1), "Type D: expected 200 transaction rows");
+            }
+            loadConn.close();
         }
     }
 
     @Test
-    @DisplayName("LocalFilePersistenceService: respects output directory parameter")
-    void testOutputDirParameter(@TempDir Path tempDir) throws Exception {
+    @DisplayName("Streaming pipeline: DuckDB COPY TO respects the given output path")
+    void testOutputPathParameter(@TempDir Path tempDir) throws Exception {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         Path customDir = tempDir.resolve("custom-output");
+        Files.createDirectories(customDir);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             DuckDBConnection conn = (DuckDBConnection)
                     DriverManager.getConnection("jdbc:duckdb:");
+            StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
+            PainParser parser = new PainParserImpl();
+            parser.parseStreaming(xmlFile, allocator, consumer);
 
-            try (LocalFilePersistenceService persistence =
-                    new LocalFilePersistenceService(customDir, "test", msgSchema, rmtSchema, txSchema)) {
-
-                StreamingBatchConsumer consumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
-                PainParser parser = new PainParserImpl();
-                parser.parseStreaming(xmlFile, allocator, consumer);
-                persistence.finish();
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("COPY message TO '"
+                        + customDir.resolve("test_message.arrow").toAbsolutePath() + "' (FORMAT arrow)");
+                stmt.execute("COPY remittance TO '"
+                        + customDir.resolve("test_remittance.arrow").toAbsolutePath() + "' (FORMAT arrow)");
+                stmt.execute("COPY transactions TO '"
+                        + customDir.resolve("test_transaction.arrow").toAbsolutePath() + "' (FORMAT arrow)");
             }
             conn.close();
         }
 
-        assertTrue(Files.exists(customDir.resolve("test_message.arrows")),
-                "message .arrows file must exist in custom directory");
-        assertTrue(Files.exists(customDir.resolve("test_remittance.arrows")),
-                "remittance .arrows file must exist in custom directory");
-        assertTrue(Files.exists(customDir.resolve("test_transaction.arrows")),
-                "transaction .arrows file must exist in custom directory");
+        assertTrue(Files.exists(customDir.resolve("test_message.arrow")),
+                "message .arrow file must exist in custom directory");
+        assertTrue(Files.exists(customDir.resolve("test_remittance.arrow")),
+                "remittance .arrow file must exist in custom directory");
+        assertTrue(Files.exists(customDir.resolve("test_transaction.arrow")),
+                "transaction .arrow file must exist in custom directory");
     }
 }

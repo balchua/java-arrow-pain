@@ -1,6 +1,5 @@
 package com.pgw;
 
-import com.pgw.arrow.Pain001ArrowSchema;
 import com.pgw.benchmark.LoadBenchmark;
 import com.pgw.dal.PaymentRepository;
 import com.pgw.dal.PaymentRepositoryImpl;
@@ -8,18 +7,14 @@ import com.pgw.parser.BatchConsumer;
 import com.pgw.parser.PainParser;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
-import com.pgw.persistence.PersistenceService;
-import com.pgw.persistence.PersistenceServiceFactory;
 import com.pgw.validation.ValidationContext;
 import com.pgw.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.duckdb.DuckDBConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -33,7 +28,7 @@ import java.time.Instant;
  * <p>Usage: {@code App <pain001.xml>}</p>
  *
  * <p>Pipeline: XML → Arrow (streaming parse) → DuckDB (live INSERT) →
- * Arrow IPC Stream files → SQL validation → report</p>
+ * DuckDB COPY TO (FORMAT arrow) → .arrow files → SQL validation → report</p>
  */
 public final class App {
 
@@ -82,10 +77,6 @@ public final class App {
         LoadBenchmark benchmark = new LoadBenchmark(label);
         benchmark.setDuckDbMemoryLimitBytes(LoadBenchmark.parseDuckDbMemoryLimit("1GB"));
 
-        Schema msgSchema = Pain001ArrowSchema.createMessageSchema();
-        Schema rmtSchema = Pain001ArrowSchema.createRemittanceSchema();
-        Schema txSchema  = Pain001ArrowSchema.createTransactionSchema();
-
         try {
             long fileSizeBytes = Files.size(xmlFile);
             benchmark.setXmlFileSizeBytes(fileSizeBytes);
@@ -95,7 +86,13 @@ public final class App {
             Path resolvedOutputDir = (outputDirEnv != null && !outputDirEnv.isBlank())
                     ? Paths.get(outputDirEnv)
                     : Paths.get("src", "main", "resources", "output");
+            Files.createDirectories(resolvedOutputDir);
             LOG.info("  Output dir : {}", resolvedOutputDir);
+
+            // Resolve output Arrow file paths
+            Path msgPath = resolvedOutputDir.resolve(baseName + "_message.arrow").toAbsolutePath();
+            Path rmtPath = resolvedOutputDir.resolve(baseName + "_remittance.arrow").toAbsolutePath();
+            Path txPath  = resolvedOutputDir.resolve(baseName + "_transaction.arrow").toAbsolutePath();
 
             LOG.info("");
             LOG.info("Processing (streaming): {} ({} bytes)", label, fileSizeBytes);
@@ -114,11 +111,8 @@ public final class App {
                     stmt.execute("SET memory_limit='1GB'");
                 }
 
-                PersistenceService persistence = PersistenceServiceFactory.create(
-                        baseName, msgSchema, rmtSchema, txSchema);
-
                 StreamingBatchConsumer streamingConsumer =
-                        new StreamingBatchConsumer(conn, persistence, allocator);
+                        new StreamingBatchConsumer(conn, allocator);
 
                 // Wrap consumer to sample off-heap memory at each batch flush
                 BatchConsumer wrappedConsumer = (tableType, root) -> {
@@ -139,10 +133,16 @@ public final class App {
                 benchmark.setOffHeapPeakBytes(allocator.getPeakMemoryAllocation());
 
                 Instant writeStart = Instant.now();
-                persistence.finish();
+                try (var stmt = conn.createStatement()) {
+                    stmt.execute("COPY message TO '" + msgPath + "' (FORMAT arrow)");
+                    stmt.execute("COPY remittance TO '" + rmtPath + "' (FORMAT arrow)");
+                    stmt.execute("COPY transactions TO '" + txPath + "' (FORMAT arrow)");
+                }
                 Duration writeDuration = Duration.between(writeStart, Instant.now());
-                benchmark.recordPhase("Arrow IPC Write", writeDuration);
-                benchmark.setArrowFileSizeBytes(persistence.getBytesWritten());
+                benchmark.recordPhase("Arrow File Export", writeDuration);
+
+                long arrowBytes = Files.size(msgPath) + Files.size(rmtPath) + Files.size(txPath);
+                benchmark.setArrowFileSizeBytes(arrowBytes);
 
                 LOG.info("");
                 LOG.info("Validating with SQL-based validators (DuckDB)...");

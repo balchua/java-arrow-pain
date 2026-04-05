@@ -19,7 +19,6 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
 | Apache Arrow | 15.0.2 (`arrow-vector`, `arrow-memory-unsafe`, `arrow-c-data`) |
 | DuckDB       | 1.4.4.0 (`duckdb_jdbc`) — in-process SQL engine       |
 | XML Parser   | StAX (`javax.xml.stream`) — streaming pull parser     |
-| AWS SDK v2   | 2.25.23 (`s3`) — optional, for S3 persistence mode    |
 | Build        | Maven 3.9+, multi-module                              |
 | Logging      | SLF4J 2.0.12                                          |
 
@@ -36,30 +35,24 @@ pain001-arrow-loader/           ← parent POM (com.pgw:pain001-arrow-loader)
 ### `pgw-ingestor` — Ingestion Pipeline
 
 Owns the ingestion concern only: StAX XML parsing, Apache Arrow schema definition,
-DuckDB live-INSERT via Arrow C Data Interface, and Arrow IPC Stream persistence.
-Contains **no domain objects** — its only output is Arrow IPC Stream files and a
-populated DuckDB connection.
+and DuckDB live-INSERT via Arrow C Data Interface. Contains **no domain objects** —
+its only output is a populated DuckDB connection, which can export Arrow files via
+`COPY TO (FORMAT arrow)`.
 
 ```
 pgw-ingestor/src/main/java/com/pgw/
 ├── arrow/
-│   ├── Pain001ArrowSchema.java       # Arrow schema definitions for all 3 tables
-│   └── ArrowBatchResult.java         # Legacy batch holder (used by --legacy path only)
+│   └── Pain001ArrowSchema.java       # Arrow schema definitions for all 3 tables
 ├── benchmark/
 │   └── LoadBenchmark.java            # Timing, memory tracking, formatted report
 ├── generator/
 │   └── PainFileSpec.java             # Data record: file spec (name, counts, invalidControlSum flag)
-├── parser/
-│   ├── PainParser.java               # Interface: parseStreaming()
-│   ├── PainParserImpl.java           # StAX impl — streaming path clears RAM per batch
-│   ├── BatchConsumer.java            # @FunctionalInterface: per-batch callback
-│   ├── ParseStats.java               # Lightweight result: (msgRows, rmtRows, txRows)
-│   └── StreamingBatchConsumer.java   # Dual-sink: DuckDB live INSERT + PersistenceService
-└── persistence/
-    ├── PersistenceService.java           # Interface: writeBatch() + finish()
-    ├── LocalFilePersistenceService.java  # Streams .arrows to configurable local dir
-    ├── S3PersistenceService.java         # Streams .arrows to S3 multipart upload
-    └── PersistenceServiceFactory.java    # Creates service from env vars
+└── parser/
+    ├── PainParser.java               # Interface: parseStreaming()
+    ├── PainParserImpl.java           # StAX impl — streaming path clears RAM per batch
+    ├── BatchConsumer.java            # @FunctionalInterface: per-batch callback
+    ├── ParseStats.java               # Lightweight result: (msgRows, rmtRows, txRows)
+    └── StreamingBatchConsumer.java   # Single DuckDB sink: Arrow C Data Interface INSERT
 ```
 
 ### `pgw-validator` — Full Domain + DAL + Validation + Application
@@ -113,9 +106,9 @@ pgw-validator/src/main/java/com/pgw/
 
 pgw-validator/src/test/java/com/pgw/
 ├── SampleGenerationTest.java         # JUnit 5: Type D (valid) + Type E (invalid CtrlSum)
-├── StreamingPipelineTest.java        # JUnit 5: streaming memory, row counts, .arrows files
-├── ArrowFileLoadBenchmarkTest.java   # JUnit 5: Arrow IPC Stream → DuckDB load speed benchmark
-├── ValidationBenchmarkTest.java      # JUnit 5: Arrow→DuckDB registration + SQL validation metrics
+├── StreamingPipelineTest.java        # JUnit 5: streaming memory, row counts, Arrow COPY TO
+├── ArrowFileLoadBenchmarkTest.java   # JUnit 5: Arrow file → DuckDB load speed benchmark
+├── ValidationBenchmarkTest.java      # JUnit 5: Arrow→DuckDB load + SQL validation metrics
 ├── MemoryLeakVerificationTest.java   # JUnit 5: 50-iteration leak verification
 ├── SampleGeneratorRunner.java        # Runnable main: generate by type (a–e)
 └── generator/
@@ -127,8 +120,8 @@ pgw-validator/src/test/java/com/pgw/
 
 | Test class | What it measures |
 |------------|-----------------|
-| `ArrowFileLoadBenchmarkTest` | Arrow IPC Stream → DuckDB load time only (no validation) |
-| `ValidationBenchmarkTest` | Arrow IPC Stream → DuckDB load time **+ SQL validation time** |
+| `ArrowFileLoadBenchmarkTest` | Arrow file → DuckDB load time only (no validation) |
+| `ValidationBenchmarkTest` | Arrow file → DuckDB load time **+ SQL validation time** |
 
 ---
 
@@ -143,31 +136,37 @@ pgw-validator/src/test/java/com/pgw/
                                               ▼
                               ┌──────────────────────────────────────────────┐
                               │  StreamingBatchConsumer                      │
-                              │  ├─ Sink A: DuckDB (C Data Interface INSERT) │
-                              │  └─ Sink B: PersistenceService               │
-                              │       ├─ LocalFilePersistenceService (local) │
-                              │       └─ S3PersistenceService (S3 upload)    │
+                              │  └─ Single Sink: DuckDB (C Data Interface)   │
                               └──────────────────────────────────────────────┘
-                                  │                         │
-                                  ▼                         ▼
-                         ┌─────────────────┐    ┌───────────────────────┐
-                         │  DuckDB         │    │  .arrows files        │
-                         │  (live tables)  │    │  (IPC Stream format)  │
-                         └────────┬────────┘    └───────────────────────┘
-                                  │
-                        PaymentRepository
-                                  │
-                  ┌───────────────┴────────────────┐
-                  │     ValidationPipeline          │
-                  │  ├─ MessageValidator      (║)   │
-                  │  ├─ RemittanceValidator   (║)   │  parallel virtual threads
-                  │  ├─ TransactionValidator  (║)   │
-                  │  │  (SQL via PaymentRepository) │
-                  │  ├─ MessageDomainValidator (║)  │
-                  │  ├─ RemittanceDomainValidator(║)│
-                  │  ├─ TransactionDomainValidator  │  (domain VOs: Iban, Bic, Amount, …)
-                  │  └─ ControlSumDomainService ──▶ │  sequential
-                  └─────────────────────────────────┘
+                                                   │
+                                                   ▼
+                                         ┌─────────────────┐
+                                         │  DuckDB         │
+                                         │  (live tables)  │
+                                         └────────┬────────┘
+                                                  │
+                                    ┌─────────────┴──────────────┐
+                                    │  COPY TO (FORMAT arrow)    │
+                                    └─────────────┬──────────────┘
+                                                  │
+                              ┌───────────────────┼───────────────────┐
+                              ▼                   ▼                   ▼
+                    _message.arrow      _remittance.arrow   _transaction.arrow
+                              └───────────────────┴───────────────────┘
+                                                  │
+                                        PaymentRepository
+                                                  │
+                                ┌─────────────────┴──────────────────┐
+                                │     ValidationPipeline              │
+                                │  ├─ MessageValidator      (║)       │
+                                │  ├─ RemittanceValidator   (║)       │  parallel virtual threads
+                                │  ├─ TransactionValidator  (║)       │
+                                │  │  (SQL via PaymentRepository)     │
+                                │  ├─ MessageDomainValidator (║)      │
+                                │  ├─ RemittanceDomainValidator(║)    │
+                                │  ├─ TransactionDomainValidator      │  (domain VOs: Iban, Bic, Amount, …)
+                                │  └─ ControlSumDomainService ──▶     │  sequential
+                                └────────────────────────────────────┘
 ```
 
 The XML is parsed in a **single streaming pass** directly into three relational Arrow tables:
@@ -188,12 +187,9 @@ Arrow type mappings follow ISO 20022 data type definitions:
 
 ## Configuration
 
-| Environment Variable    | Default                        | Description |
-|-------------------------|--------------------------------|-------------|
-| `PAIN_PERSISTENCE_MODE` | `local`                        | Output sink: `local` or `s3` |
-| `PAIN_LOCAL_OUTPUT_DIR` | `pgw-ingestor/src/main/resources/output` | Local output directory |
-| `PAIN_S3_BUCKET`        | _(required for s3 mode)_       | Target S3 bucket name |
-| `PAIN_S3_KEY_PREFIX`    | `pain001`                      | S3 key prefix (folder) |
+| Environment Variable    | Default                                  | Description |
+|-------------------------|------------------------------------------|-------------|
+| `PAIN_LOCAL_OUTPUT_DIR` | `src/main/resources/output`              | Output directory for Arrow files |
 
 ---
 
@@ -208,17 +204,12 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 
 # ── Run the application (no benchmark) ────────────────────────────────────────
 
-# Local persistence (writes .arrows files to src/main/resources/output/)
+# Writes .arrow files to src/main/resources/output/
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
 
 # Custom output directory
 PAIN_LOCAL_OUTPUT_DIR=/data/arrows \
-  MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
-  mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
-
-# S3 persistence mode
-PAIN_PERSISTENCE_MODE=s3 PAIN_S3_BUCKET=my-bucket PAIN_S3_KEY_PREFIX=pain001/2026/02 \
   MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
 
@@ -229,12 +220,12 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor,pgw-validator \
   -Dtest="SampleGenerationTest,StreamingPipelineTest"
 
-# Validation-stage benchmark only (Arrow IPC → DuckDB load + SQL validation)
+# Validation-stage benchmark only (Arrow → DuckDB load + SQL validation)
 # Generates Types A–E Arrow files if absent; runs quickly once files exist
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn test -pl pgw-ingestor,pgw-validator -Dtest=ValidationBenchmarkTest
 
-# Arrow IPC → DuckDB load benchmark only (no validation)
+# Arrow → DuckDB load benchmark only (no validation)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn test -pl pgw-ingestor,pgw-validator -Dtest=ArrowFileLoadBenchmarkTest
 
@@ -307,16 +298,16 @@ ValidationPipeline
 
 ---
 
-## Arrow File Sharing via S3
+## Arrow File Sharing
 
 ```
 Producer App                          Consumer App A
-  parse XML once (streaming)          download .arrows files (~224–362 MB)
-  export Arrow IPC  ──S3──▶           load into DuckDB:  ~376–687 ms
-  3 × .arrows files                   run SQL analytics
+  parse XML once (streaming)          load .arrow files into DuckDB:  ~376–687 ms
+  DuckDB COPY TO ──disk/S3──▶         run SQL analytics
+  3 × .arrow files
 
-                    ──S3──▶           Consumer App B: same ~400 ms
-                    ──S3──▶           Consumer App C: same ~400 ms
+                  ──disk/S3──▶         Consumer App B: same ~400 ms
+                  ──disk/S3──▶         Consumer App C: same ~400 ms
 ```
 
 ---

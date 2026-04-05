@@ -108,6 +108,17 @@ public final class PainParserImpl implements PainParser {
         boolean inCdtr = false;
         boolean inRgltryRptg = false;
         boolean inRgltryRptgDtls = false;
+        boolean inPmtTpInf = false;
+        boolean inLclInstrm = false;
+        boolean inCtgyPurp = false;
+        boolean inUltmtDbtr = false;
+        boolean inUltmtCdtr = false;
+        boolean inPstlAdr = false;
+        boolean inPurp = false;
+        boolean inStrd = false;
+        boolean inCdtrRefInf = false;
+        boolean inCdtrRefInfTp = false;
+        boolean inCdOrPrtry = false;
 
         String pmtMtd = null;
         String pmtNbOfTxs = null;
@@ -117,6 +128,12 @@ public final class PainParserImpl implements PainParser {
         String pmtDbtrNm = null;
         String pmtDbtrAcctIban = null;
         String pmtDbtrAgtBicfi = null;
+        String pmtBtchBookg = null;
+        String pmtInstrPrty = null;
+        String pmtLclInstrmCd = null;
+        String pmtCtgyPurpCd = null;
+        String pmtChrgBr = null;
+        String pmtUltmtDbtrNm = null;
 
         String grpCreDtTm = null;
         String grpNbOfTxs = null;
@@ -132,6 +149,11 @@ public final class PainParserImpl implements PainParser {
         String txCdtrAcctIban = null;
         StringBuilder txRmtInfUstrd = null;
         StringBuilder txRgltyRptgCd = null;
+        String txUltmtCdtrNm = null;
+        String txCdtrCtry = null;
+        String txPurpCd = null;
+        String txRmtInfStrdRef = null;
+        String txRmtInfStrdRefTp = null;
 
         long totalTx = 0;
         long totalRmt = 0;
@@ -155,6 +177,29 @@ public final class PainParserImpl implements PainParser {
                         case "CdtrAcct" -> inCdtrAcct = true;
                         case "SvcLvl" -> inSvcLvl = true;
                         case "ReqdExctnDt" -> inReqdExctnDt = true;
+                        case "PmtTpInf" -> inPmtTpInf = true;
+                        case "LclInstrm" -> inLclInstrm = true;
+                        case "CtgyPurp" -> inCtgyPurp = true;
+                        case "Strd" -> {
+                            if (inCdtTrfTxInf)
+                                inStrd = true;
+                        }
+                        case "CdtrRefInf" -> {
+                            if (inCdtTrfTxInf && inStrd)
+                                inCdtrRefInf = true;
+                        }
+                        case "Tp" -> {
+                            if (inCdtTrfTxInf && inStrd && inCdtrRefInf)
+                                inCdtrRefInfTp = true;
+                        }
+                        case "CdOrPrtry" -> {
+                            if (inCdtTrfTxInf && inStrd && inCdtrRefInf && inCdtrRefInfTp)
+                                inCdOrPrtry = true;
+                        }
+                        case "Purp" -> {
+                            if (inCdtTrfTxInf)
+                                inPurp = true;
+                        }
                         case "Dbtr" -> {
                             if (inPmtInf && !inCdtTrfTxInf)
                                 inDbtr = true;
@@ -162,6 +207,18 @@ public final class PainParserImpl implements PainParser {
                         case "Cdtr" -> {
                             if (inCdtTrfTxInf)
                                 inCdtr = true;
+                        }
+                        case "PstlAdr" -> {
+                            if (inCdtTrfTxInf && inCdtr)
+                                inPstlAdr = true;
+                        }
+                        case "UltmtDbtr" -> {
+                            if (inPmtInf && !inCdtTrfTxInf)
+                                inUltmtDbtr = true;
+                        }
+                        case "UltmtCdtr" -> {
+                            if (inCdtTrfTxInf)
+                                inUltmtCdtr = true;
                         }
                         case "RgltryRptg" -> {
                             if (inCdtTrfTxInf)
@@ -208,8 +265,12 @@ public final class PainParserImpl implements PainParser {
                         case "Nm" -> {
                             if (inGrpHdr && !inPmtInf)
                                 grpInitgPtyNm = textContent.toString().trim();
+                            else if (inCdtTrfTxInf && inUltmtCdtr)
+                                txUltmtCdtrNm = textContent.toString().trim();
                             else if (inCdtTrfTxInf && inCdtr)
                                 txCdtrNm = textContent.toString().trim();
+                            else if (inPmtInf && !inCdtTrfTxInf && inUltmtDbtr)
+                                pmtUltmtDbtrNm = textContent.toString().trim();
                             else if (inPmtInf && !inCdtTrfTxInf && inDbtr)
                                 pmtDbtrNm = textContent.toString().trim();
                         }
@@ -236,6 +297,14 @@ public final class PainParserImpl implements PainParser {
                         case "Cd" -> {
                             if (inPmtInf && !inCdtTrfTxInf && inSvcLvl)
                                 pmtSvcLvlCd = textContent.toString().trim();
+                            else if (inPmtInf && !inCdtTrfTxInf && inLclInstrm)
+                                pmtLclInstrmCd = textContent.toString().trim();
+                            else if (inPmtInf && !inCdtTrfTxInf && inCtgyPurp)
+                                pmtCtgyPurpCd = textContent.toString().trim();
+                            else if (inCdtTrfTxInf && inPurp)
+                                txPurpCd = textContent.toString().trim();
+                            else if (inCdtTrfTxInf && inStrd && inCdtrRefInf && inCdtrRefInfTp && inCdOrPrtry)
+                                txRmtInfStrdRefTp = textContent.toString().trim();
                             else if (inCdtTrfTxInf && inRgltryRptg && inRgltryRptgDtls) {
                                 String code = textContent.toString().trim();
                                 if (!code.isEmpty()) {
@@ -249,6 +318,26 @@ public final class PainParserImpl implements PainParser {
                         case "Dt" -> {
                             if (inPmtInf && !inCdtTrfTxInf && inReqdExctnDt)
                                 pmtReqdExctnDt = textContent.toString().trim();
+                        }
+                        case "BtchBookg" -> {
+                            if (inPmtInf && !inCdtTrfTxInf)
+                                pmtBtchBookg = textContent.toString().trim();
+                        }
+                        case "InstrPrty" -> {
+                            if (inPmtInf && !inCdtTrfTxInf && inPmtTpInf)
+                                pmtInstrPrty = textContent.toString().trim();
+                        }
+                        case "ChrgBr" -> {
+                            if (inPmtInf && !inCdtTrfTxInf)
+                                pmtChrgBr = textContent.toString().trim();
+                        }
+                        case "Ctry" -> {
+                            if (inCdtTrfTxInf && inCdtr && inPstlAdr)
+                                txCdtrCtry = textContent.toString().trim();
+                        }
+                        case "Ref" -> {
+                            if (inCdtTrfTxInf && inStrd && inCdtrRefInf)
+                                txRmtInfStrdRef = textContent.toString().trim();
                         }
                         case "IBAN" -> {
                             if (inCdtTrfTxInf && inCdtrAcct)
@@ -269,6 +358,23 @@ public final class PainParserImpl implements PainParser {
                         case "CdtrAgt" -> inCdtrAgt = false;
                         case "DbtrAcct" -> inDbtrAcct = false;
                         case "CdtrAcct" -> inCdtrAcct = false;
+                        case "PmtTpInf" -> inPmtTpInf = false;
+                        case "LclInstrm" -> inLclInstrm = false;
+                        case "CtgyPurp" -> inCtgyPurp = false;
+                        case "Purp" -> inPurp = false;
+                        case "CdOrPrtry" -> inCdOrPrtry = false;
+                        case "Tp" -> {
+                            if (inCdtTrfTxInf && inStrd && inCdtrRefInf)
+                                inCdtrRefInfTp = false;
+                        }
+                        case "CdtrRefInf" -> {
+                            if (inCdtTrfTxInf && inStrd)
+                                inCdtrRefInf = false;
+                        }
+                        case "Strd" -> {
+                            if (inCdtTrfTxInf)
+                                inStrd = false;
+                        }
                         case "Dbtr" -> {
                             if (inPmtInf && !inCdtTrfTxInf)
                                 inDbtr = false;
@@ -276,6 +382,18 @@ public final class PainParserImpl implements PainParser {
                         case "Cdtr" -> {
                             if (inCdtTrfTxInf)
                                 inCdtr = false;
+                        }
+                        case "PstlAdr" -> {
+                            if (inCdtTrfTxInf)
+                                inPstlAdr = false;
+                        }
+                        case "UltmtDbtr" -> {
+                            if (inPmtInf && !inCdtTrfTxInf)
+                                inUltmtDbtr = false;
+                        }
+                        case "UltmtCdtr" -> {
+                            if (inCdtTrfTxInf)
+                                inUltmtCdtr = false;
                         }
                         case "Dtls" -> {
                             if (inRgltryRptg)
@@ -297,6 +415,12 @@ public final class PainParserImpl implements PainParser {
                             setVarChar(rmtRoot, Pain001ArrowSchema.RMT_DBTR_NM, rmtRow, pmtDbtrNm);
                             setVarChar(rmtRoot, Pain001ArrowSchema.RMT_DBTR_ACCT_IBAN, rmtRow, pmtDbtrAcctIban);
                             setVarChar(rmtRoot, Pain001ArrowSchema.RMT_DBTR_AGT_BICFI, rmtRow, pmtDbtrAgtBicfi);
+                            setVarChar(rmtRoot, Pain001ArrowSchema.RMT_BTCH_BOOKG, rmtRow, pmtBtchBookg);
+                            setVarChar(rmtRoot, Pain001ArrowSchema.RMT_INSTR_PRTY, rmtRow, pmtInstrPrty);
+                            setVarChar(rmtRoot, Pain001ArrowSchema.RMT_LCL_INSTRM_CD, rmtRow, pmtLclInstrmCd);
+                            setVarChar(rmtRoot, Pain001ArrowSchema.RMT_CTGY_PURP_CD, rmtRow, pmtCtgyPurpCd);
+                            setVarChar(rmtRoot, Pain001ArrowSchema.RMT_CHRG_BR, rmtRow, pmtChrgBr);
+                            setVarChar(rmtRoot, Pain001ArrowSchema.RMT_ULTMT_DBTR_NM, rmtRow, pmtUltmtDbtrNm);
                             rmtRow++;
                             totalRmt++;
 
@@ -318,6 +442,12 @@ public final class PainParserImpl implements PainParser {
                             pmtDbtrNm = null;
                             pmtDbtrAcctIban = null;
                             pmtDbtrAgtBicfi = null;
+                            pmtBtchBookg = null;
+                            pmtInstrPrty = null;
+                            pmtLclInstrmCd = null;
+                            pmtCtgyPurpCd = null;
+                            pmtChrgBr = null;
+                            pmtUltmtDbtrNm = null;
                         }
 
                         case "InstrId" -> {
@@ -361,6 +491,11 @@ public final class PainParserImpl implements PainParser {
                                     txRmtInfUstrd != null ? txRmtInfUstrd.toString() : null);
                             setVarChar(txRoot, Pain001ArrowSchema.TX_RGLTY_RPTG_CD, txRow,
                                     txRgltyRptgCd != null ? txRgltyRptgCd.toString() : null);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_RMT_INF_STRD_REF, txRow, txRmtInfStrdRef);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_RMT_INF_STRD_REF_TP, txRow, txRmtInfStrdRefTp);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_PURP_CD, txRow, txPurpCd);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_ULTMT_CDTR_NM, txRow, txUltmtCdtrNm);
+                            setVarChar(txRoot, Pain001ArrowSchema.TX_CDTR_CTRY, txRow, txCdtrCtry);
                             txRow++;
                             totalTx++;
 
@@ -373,6 +508,11 @@ public final class PainParserImpl implements PainParser {
                             txCdtrAcctIban = null;
                             txRmtInfUstrd = null;
                             txRgltyRptgCd = null;
+                            txUltmtCdtrNm = null;
+                            txCdtrCtry = null;
+                            txPurpCd = null;
+                            txRmtInfStrdRef = null;
+                            txRmtInfStrdRefTp = null;
                             inCdtTrfTxInf = false;
 
                             if (txRow >= BATCH_SIZE) {

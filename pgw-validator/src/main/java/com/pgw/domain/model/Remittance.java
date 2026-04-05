@@ -22,5 +22,11 @@ public record Remittance(
         LocalDate requestedExecutionDate,
         String debtor,
         String debtorAccountIban,
-        String debtorAgentBic) {
+        String debtorAgentBic,
+        String batchBooking,
+        String instructionPriority,
+        String localInstrumentCode,
+        String categoryPurposeCode,
+        String chargeBearer,
+        String ultimateDebtorName) {
 }

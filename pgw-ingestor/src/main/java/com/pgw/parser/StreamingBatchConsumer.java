@@ -77,7 +77,13 @@ public final class StreamingBatchConsumer implements BatchConsumer {
                     + "reqd_exctn_dt DATE, "
                     + "dbtr_nm VARCHAR, "
                     + "dbtr_acct_iban VARCHAR, "
-                    + "dbtr_agt_bicfi VARCHAR"
+                    + "dbtr_agt_bicfi VARCHAR, "
+                    + "btch_bookg VARCHAR, "
+                    + "instr_prty VARCHAR, "
+                    + "lcl_instrm_cd VARCHAR, "
+                    + "ctgy_purp_cd VARCHAR, "
+                    + "chrg_br VARCHAR, "
+                    + "ultmt_dbtr_nm VARCHAR"
                     + ")");
 
             stmt.execute("CREATE TABLE IF NOT EXISTS transactions ("
@@ -90,7 +96,12 @@ public final class StreamingBatchConsumer implements BatchConsumer {
                     + "cdtr_nm VARCHAR, "
                     + "cdtr_acct_iban VARCHAR, "
                     + "rmt_inf_ustrd VARCHAR, "
-                    + "rglty_rptg_cd VARCHAR"
+                    + "rglty_rptg_cd VARCHAR, "
+                    + "rmt_inf_strd_ref VARCHAR, "
+                    + "rmt_inf_strd_ref_tp VARCHAR, "
+                    + "purp_cd VARCHAR, "
+                    + "ultmt_cdtr_nm VARCHAR, "
+                    + "cdtr_ctry VARCHAR"
                     + ")");
         }
     }

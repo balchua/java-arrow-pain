@@ -18,6 +18,11 @@ public record Transaction(
         String creditorAgentBic,
         String creditor,
         String creditorAccountIban,
-        String remittanceInfo,
-        String regulatoryReportingCode) {
+        String remittanceInfoUnstructured,
+        String regulatoryReportingCode,
+        String remittanceInfoStructuredRef,
+        String remittanceInfoStructuredRefType,
+        String purposeCode,
+        String ultimateCreditorName,
+        String creditorCountry) {
 }

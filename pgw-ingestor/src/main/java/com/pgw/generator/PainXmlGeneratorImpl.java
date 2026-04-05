@@ -53,9 +53,12 @@ public final class PainXmlGeneratorImpl implements PainXmlGenerator {
             "Acme Corporation", "Global Industries Ltd", "Smith Trading Co",
             "EuroPayments GmbH", "Nordic Supplies AB", "Atlantic Services SA"
     };
+    private static final String[] CREDITOR_COUNTRIES = {"IT", "ES", "AT", "BE", "CH", "PT"};
     private static final String[] REGULATORY_CODES = {
             "BENEFICIARY_RESIDENT", "RESIDENT", "NONRESIDENT", "REGLF001", "REGLF002"
     };
+    private static final String[] CATEGORY_PURPOSE_CODES = {"SALA", "SUPP", "TAXS", "GDDS", "TRAD"};
+    private static final String[] PURPOSE_CODES = {"GDDS", "SUPP", "SALA", "TAXS", "TRAD"};
 
     public PainXmlGeneratorImpl() {}
 
@@ -174,14 +177,24 @@ public final class PainXmlGeneratorImpl implements PainXmlGenerator {
         writeElement(writer, "PmtInfId",
                 String.format("PMT-%06d", pmtIndex + 1));
         writeElement(writer, "PmtMtd", "TRF");
+        writeElement(writer, "BtchBookg", "false");
         writeElement(writer, "NbOfTxs", String.valueOf(txCount));
         writeElement(writer, "CtrlSum", blockCtrlSumStr);
 
         writer.writeStartElement("PmtTpInf");
+        writeElement(writer, "InstrPrty", pmtIndex % 3 == 0 ? "HIGH" : "NORM");
         writer.writeStartElement("SvcLvl");
         writeElement(writer, "Cd", "SEPA");
         writer.writeEndElement(); // SvcLvl
+        writer.writeStartElement("LclInstrm");
+        writeElement(writer, "Cd", "CORE");
+        writer.writeEndElement(); // LclInstrm
+        writer.writeStartElement("CtgyPurp");
+        writeElement(writer, "Cd", CATEGORY_PURPOSE_CODES[pmtIndex % CATEGORY_PURPOSE_CODES.length]);
+        writer.writeEndElement(); // CtgyPurp
         writer.writeEndElement(); // PmtTpInf
+
+        writeElement(writer, "ChrgBr", "SLEV");
 
         writer.writeStartElement("ReqdExctnDt");
         writeElement(writer, "Dt", LocalDate.now().plusDays(1).format(ISO_DATE_FORMAT));
@@ -202,6 +215,10 @@ public final class PainXmlGeneratorImpl implements PainXmlGenerator {
         writeElement(writer, "BICFI", debtorBic);
         writer.writeEndElement(); // FinInstnId
         writer.writeEndElement(); // DbtrAgt
+
+        writer.writeStartElement("UltmtDbtr");
+        writeElement(writer, "Nm", "Ultimate Debtor " + (pmtIndex + 1));
+        writer.writeEndElement(); // UltmtDbtr
 
         for (int txIdx = 0; txIdx < txCount; txIdx++) {
             writeCreditTransferTransaction(writer, pmtIndex, txIdx, txAmount);
@@ -240,8 +257,15 @@ public final class PainXmlGeneratorImpl implements PainXmlGenerator {
         writer.writeEndElement(); // FinInstnId
         writer.writeEndElement(); // CdtrAgt
 
+        writer.writeStartElement("UltmtCdtr");
+        writeElement(writer, "Nm", "Ultimate " + CREDITOR_NAMES[credIdx]);
+        writer.writeEndElement(); // UltmtCdtr
+
         writer.writeStartElement("Cdtr");
         writeElement(writer, "Nm", CREDITOR_NAMES[credIdx]);
+        writer.writeStartElement("PstlAdr");
+        writeElement(writer, "Ctry", CREDITOR_COUNTRIES[credIdx]);
+        writer.writeEndElement(); // PstlAdr
         writer.writeEndElement(); // Cdtr
 
         writer.writeStartElement("CdtrAcct");
@@ -250,11 +274,25 @@ public final class PainXmlGeneratorImpl implements PainXmlGenerator {
         writer.writeEndElement(); // Id
         writer.writeEndElement(); // CdtrAcct
 
+        writer.writeStartElement("Purp");
+        writeElement(writer, "Cd", PURPOSE_CODES[txIndex % PURPOSE_CODES.length]);
+        writer.writeEndElement(); // Purp
+
         writer.writeStartElement("RmtInf");
         writeElement(writer, "Ustrd",
                 String.format("Invoice PMT%06d-TX%07d", pmtIndex + 1, txIndex + 1));
         writeElement(writer, "Ustrd",
                 String.format("Ref %s/%s", CREDITOR_NAMES[credIdx].replaceAll("\\s+", "-"), txIndex + 1));
+        writer.writeStartElement("Strd");
+        writer.writeStartElement("CdtrRefInf");
+        writer.writeStartElement("Tp");
+        writer.writeStartElement("CdOrPrtry");
+        writeElement(writer, "Cd", "SCOR");
+        writer.writeEndElement(); // CdOrPrtry
+        writer.writeEndElement(); // Tp
+        writeElement(writer, "Ref", String.format("REF%06d%07d", pmtIndex + 1, txIndex + 1));
+        writer.writeEndElement(); // CdtrRefInf
+        writer.writeEndElement(); // Strd
         writer.writeEndElement(); // RmtInf
 
         writer.writeStartElement("RgltryRptg");

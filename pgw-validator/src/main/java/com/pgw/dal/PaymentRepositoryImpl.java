@@ -437,7 +437,8 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT msg_id, pmt_inf_id, pmt_mtd, nb_of_txs, ctrl_sum, svc_lvl_cd,"
-                        + " reqd_exctn_dt, dbtr_nm, dbtr_acct_iban, dbtr_agt_bicfi"
+                        + " reqd_exctn_dt, dbtr_nm, dbtr_acct_iban, dbtr_agt_bicfi,"
+                        + " btch_bookg, instr_prty, lcl_instrm_cd, ctgy_purp_cd, chrg_br, ultmt_dbtr_nm"
                         + " FROM remittance WHERE msg_id = ?")) {
             ps.setFetchSize(100);
             ps.setString(1, messageId);
@@ -455,7 +456,13 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
                             execDate,
                             rs.getString(8),
                             rs.getString(9),
-                            rs.getString(10)));
+                            rs.getString(10),
+                            rs.getString(11),
+                            rs.getString(12),
+                            rs.getString(13),
+                            rs.getString(14),
+                            rs.getString(15),
+                            rs.getString(16)));
                 }
             }
         }
@@ -467,7 +474,8 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
             throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT pmt_inf_id, instr_id, end_to_end_id, instd_amt, ccy,"
-                        + " cdtr_agt_bicfi, cdtr_nm, cdtr_acct_iban, rmt_inf_ustrd, rglty_rptg_cd"
+                        + " cdtr_agt_bicfi, cdtr_nm, cdtr_acct_iban, rmt_inf_ustrd, rglty_rptg_cd,"
+                        + " rmt_inf_strd_ref, rmt_inf_strd_ref_tp, purp_cd, ultmt_cdtr_nm, cdtr_ctry"
                         + " FROM transactions WHERE pmt_inf_id = ?")) {
             ps.setFetchSize(1000);
             ps.setString(1, remittanceId);
@@ -483,7 +491,12 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
                             rs.getString(7),
                             rs.getString(8),
                             rs.getString(9),
-                            rs.getString(10)));
+                            rs.getString(10),
+                            rs.getString(11),
+                            rs.getString(12),
+                            rs.getString(13),
+                            rs.getString(14),
+                            rs.getString(15)));
                 }
             }
         }

@@ -1,15 +1,12 @@
 package com.pgw;
 
 import com.pgw.arrow.Pain001ArrowSchema;
-import com.pgw.dal.PaymentRepository;
-import com.pgw.dal.PaymentRepositoryImpl;
 import com.pgw.generator.TestFileGenerator;
 import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.parser.PainParser;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
 import com.pgw.persistence.LocalFilePersistenceService;
-import com.pgw.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -27,7 +24,7 @@ import java.util.stream.LongStream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Verifies that the streaming parse → DuckDB load → validate pipeline does not leak Arrow
+ * Verifies that the streaming parse → DuckDB load pipeline does not leak Arrow
  * allocator memory across repeated iterations — simulating a long-running process.
  *
  * <p>A single {@link RootAllocator} is shared across all iterations.
@@ -61,7 +58,7 @@ class MemoryLeakVerificationTest {
     }
 
     /**
-     * Runs the full streaming pipeline {@code iterations} times with a shared allocator,
+     * Runs the full streaming parse pipeline {@code iterations} times with a shared allocator,
      * asserting zero bytes remain allocated after each iteration.
      */
     private static void runStreamingLeakCheck(Path xmlFile, int iterations, String label)
@@ -99,9 +96,7 @@ class MemoryLeakVerificationTest {
                     persistence.finish();
                 }
 
-                try (PaymentRepository repo = new PaymentRepositoryImpl(conn)) {
-                    ValidationPipeline.standard().execute(repo);
-                }
+                conn.close();
 
                 parseTimes[i] = System.currentTimeMillis() - t0;
 
@@ -114,9 +109,7 @@ class MemoryLeakVerificationTest {
 
         LongSummaryStatistics parseStats = LongStream.of(parseTimes).summaryStatistics();
         System.out.printf("%n[%s] Streaming leak check: %d iterations, 0 bytes leaked.%n"
-                + "  Parse+validate time — min: %,d ms, max: %,d ms, avg: %,.1f ms%n",
+                + "  Parse time — min: %,d ms, max: %,d ms, avg: %,.1f ms%n",
                 label, iterations, parseStats.getMin(), parseStats.getMax(), parseStats.getAverage());
     }
 }
-
-

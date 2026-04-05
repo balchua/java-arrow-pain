@@ -125,6 +125,18 @@ public final class Pain001ArrowSchema {
     public static final String RMT_DBTR_ACCT_IBAN = "dbtr_acct_iban";
     /** DbtrAgt/FinInstnId/BICFI: BICFIDec2014Identifier */
     public static final String RMT_DBTR_AGT_BICFI = "dbtr_agt_bicfi";
+    /** BtchBookg: batch booking flag (true/false) */
+    public static final String RMT_BTCH_BOOKG = "btch_bookg";
+    /** PmtTpInf/InstrPrty: instruction priority (HIGH/NORM) */
+    public static final String RMT_INSTR_PRTY = "instr_prty";
+    /** PmtTpInf/LclInstrm/Cd: local instrument code (e.g. CORE) */
+    public static final String RMT_LCL_INSTRM_CD = "lcl_instrm_cd";
+    /** PmtTpInf/CtgyPurp/Cd: category purpose code (e.g. SALA, SUPP) */
+    public static final String RMT_CTGY_PURP_CD = "ctgy_purp_cd";
+    /** ChrgBr: charge bearer (DEBT/CRED/SHAR/SLEV) */
+    public static final String RMT_CHRG_BR = "chrg_br";
+    /** UltmtDbtr/Nm: ultimate debtor name */
+    public static final String RMT_ULTMT_DBTR_NM = "ultmt_dbtr_nm";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Transaction (CreditTransferTransaction34) field names
@@ -150,6 +162,16 @@ public final class Pain001ArrowSchema {
     public static final String TX_RMT_INF_USTRD = "rmt_inf_ustrd";
     /** RgltryRptg/Dtls/Cd: newline-delimited regulatory reporting codes */
     public static final String TX_RGLTY_RPTG_CD = "rglty_rptg_cd";
+    /** RmtInf/Strd/CdtrRefInf/Ref: structured remittance - creditor reference */
+    public static final String TX_RMT_INF_STRD_REF = "rmt_inf_strd_ref";
+    /** RmtInf/Strd/CdtrRefInf/Tp/CdOrPrtry/Cd: structured remittance reference type */
+    public static final String TX_RMT_INF_STRD_REF_TP = "rmt_inf_strd_ref_tp";
+    /** Purp/Cd: purpose code (e.g. GDDS, SUPP, SALA) */
+    public static final String TX_PURP_CD = "purp_cd";
+    /** UltmtCdtr/Nm: ultimate creditor name */
+    public static final String TX_ULTMT_CDTR_NM = "ultmt_cdtr_nm";
+    /** Cdtr/PstlAdr/Ctry: creditor country code */
+    public static final String TX_CDTR_CTRY = "cdtr_ctry";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Schema factory methods
@@ -182,7 +204,13 @@ public final class Pain001ArrowSchema {
                 field(RMT_REQD_EXCTN_DT, DATE_DAY, false),
                 field(RMT_DBTR_NM, UTF8, false),
                 field(RMT_DBTR_ACCT_IBAN, UTF8, false),
-                field(RMT_DBTR_AGT_BICFI, UTF8, false)));
+                field(RMT_DBTR_AGT_BICFI, UTF8, false),
+                field(RMT_BTCH_BOOKG, UTF8, true),
+                field(RMT_INSTR_PRTY, UTF8, true),
+                field(RMT_LCL_INSTRM_CD, UTF8, true),
+                field(RMT_CTGY_PURP_CD, UTF8, true),
+                field(RMT_CHRG_BR, UTF8, true),
+                field(RMT_ULTMT_DBTR_NM, UTF8, true)));
     }
 
     /**
@@ -200,7 +228,12 @@ public final class Pain001ArrowSchema {
                 field(TX_CDTR_NM, UTF8, false),
                 field(TX_CDTR_ACCT_IBAN, UTF8, false),
                 field(TX_RMT_INF_USTRD, UTF8, true),
-                field(TX_RGLTY_RPTG_CD, UTF8, true)));
+                field(TX_RGLTY_RPTG_CD, UTF8, true),
+                field(TX_RMT_INF_STRD_REF, UTF8, true),
+                field(TX_RMT_INF_STRD_REF_TP, UTF8, true),
+                field(TX_PURP_CD, UTF8, true),
+                field(TX_ULTMT_CDTR_NM, UTF8, true),
+                field(TX_CDTR_CTRY, UTF8, true)));
     }
 
     private static Field field(String name, ArrowType type, boolean nullable) {

@@ -1,8 +1,6 @@
 package com.pgw;
 
 import com.pgw.arrow.Pain001ArrowSchema;
-import com.pgw.dal.PaymentRepository;
-import com.pgw.dal.PaymentRepositoryImpl;
 import com.pgw.generator.TestFileGenerator;
 import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.parser.BatchConsumer;
@@ -23,7 +21,6 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.FileInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.sql.DriverManager;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -105,15 +102,22 @@ class StreamingPipelineTest {
             }
         }
 
-        try (PaymentRepository repo = new PaymentRepositoryImpl(conn)) {
-            assertEquals(stats.remittanceRows(), repo.getRemittanceCount(),
-                    "Remittance row count mismatch");
-            assertEquals(stats.transactionRows(), repo.getTransactionCount(),
-                    "Transaction row count mismatch");
-            // Type D: 2 remittances, 200 transactions
-            assertEquals(2L,   stats.remittanceRows(),  "Type D: expected 2 remittances");
-            assertEquals(200L, stats.transactionRows(), "Type D: expected 200 transactions");
+        long rmtCount, txCount;
+        try (var stmt = conn.createStatement()) {
+            try (var rs = stmt.executeQuery("SELECT COUNT(*) FROM remittance")) {
+                rmtCount = rs.next() ? rs.getLong(1) : 0L;
+            }
+            try (var rs2 = stmt.executeQuery("SELECT COUNT(*) FROM transactions")) {
+                txCount = rs2.next() ? rs2.getLong(1) : 0L;
+            }
         }
+        conn.close();
+
+        assertEquals(stats.remittanceRows(), rmtCount, "Remittance row count mismatch");
+        assertEquals(stats.transactionRows(), txCount, "Transaction row count mismatch");
+        // Type D: 2 remittances, 200 transactions
+        assertEquals(2L,   stats.remittanceRows(),  "Type D: expected 2 remittances");
+        assertEquals(200L, stats.transactionRows(), "Type D: expected 200 transactions");
     }
 
     @Test
@@ -151,7 +155,6 @@ class StreamingPipelineTest {
         assertTrue(Files.exists(txFile),  "transaction .arrows file must exist");
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            // Read message file
             long msgRows = 0;
             try (FileInputStream fis = new FileInputStream(msgFile.toFile());
                  ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
@@ -161,7 +164,6 @@ class StreamingPipelineTest {
             }
             assertTrue(msgRows > 0, "message file must have at least one row");
 
-            // Read remittance file
             long rmtRows = 0;
             try (FileInputStream fis = new FileInputStream(rmtFile.toFile());
                  ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
@@ -171,7 +173,6 @@ class StreamingPipelineTest {
             }
             assertEquals(2L, rmtRows, "Type D: expected 2 remittance rows in .arrows file");
 
-            // Read transaction file
             long txRows = 0;
             try (FileInputStream fis = new FileInputStream(txFile.toFile());
                  ArrowStreamReader reader = new ArrowStreamReader(fis, allocator)) {
@@ -210,7 +211,6 @@ class StreamingPipelineTest {
             conn.close();
         }
 
-        // Verify files landed in the custom directory
         assertTrue(Files.exists(customDir.resolve("test_message.arrows")),
                 "message .arrows file must exist in custom directory");
         assertTrue(Files.exists(customDir.resolve("test_remittance.arrows")),

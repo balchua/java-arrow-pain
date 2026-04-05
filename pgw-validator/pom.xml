@@ -41,6 +41,15 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- pgw-ingestor test-jar — provides TestFileGenerator, TestPainFileSpecs -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

@@ -30,18 +30,18 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>Each run separates two distinct phases:
  * <ol>
  *   <li><b>DuckDB registration</b> — time to load pre-exported Arrow files into an
- *       in-process DuckDB database via {@code read_arrow()}</li>
+ *       in-process DuckDB database via {@link ArrowIpc#load} (C Data Interface, no extension)</li>
  *   <li><b>SQL validation</b> — time to run the full {@link ValidationPipeline} against
  *       the populated DuckDB tables (IBAN MOD-97, BIC, ControlSum, …)</li>
  * </ol>
  *
- * <p>Arrow files are generated on demand if absent (XML → DuckDB → COPY TO (FORMAT arrow)).
+ * <p>Arrow files are generated on demand if absent (XML → DuckDB → {@link ArrowIpc#export}).
  * The DuckDB load metrics here are specifically in the context of validation, giving
  * you the full latency picture for the validator module:</p>
  *
  * <pre>
  *   .arrow files on disk
- *        ↓  [DuckDB read_arrow() time]
+ *        ↓  [ArrowIpc.load time — C Data Interface]
  *   in-process DuckDB
  *        ↓  [SQL validation time]
  *   ValidationContext (errors / warnings)
@@ -95,7 +95,7 @@ class ValidationBenchmarkTest {
 
     private ValidationResult runValidation(PainFileSpec spec, long allocatorLimit)
             throws Exception {
-        // Step 1: Ensure Arrow files exist (generate XML + parse + COPY TO if absent)
+        // Step 1: Ensure Arrow files exist (generate XML + parse + ArrowIpc.export if absent)
         Path xmlFile = TestFileGenerator.generateIfAbsent(spec);
         Files.createDirectories(OUTPUT_DIR);
 
@@ -110,7 +110,7 @@ class ValidationBenchmarkTest {
 
         long totalArrowBytes = Files.size(msgFile) + Files.size(rmtFile) + Files.size(txFile);
 
-        // Step 2: Load Arrow files into a fresh DuckDB via read_arrow()
+        // Step 2: Load Arrow files into a fresh DuckDB via ArrowIpc.load (no extension)
         long remittanceRows;
         long transactionRows;
         long duckdbLoadMs;
@@ -119,31 +119,30 @@ class ValidationBenchmarkTest {
         int errorCount;
 
         long duckdbStart = System.currentTimeMillis();
-        DuckDBConnection loadConn = DuckDbFactory.newConnection();
-        try (var stmt = loadConn.createStatement()) {
-            stmt.execute("SET memory_limit='1GB'");
-            stmt.execute("CREATE TABLE message AS SELECT * FROM read_arrow('"
-                    + msgFile.toAbsolutePath() + "')");
-            stmt.execute("CREATE TABLE remittance AS SELECT * FROM read_arrow('"
-                    + rmtFile.toAbsolutePath() + "')");
-            stmt.execute("CREATE TABLE transactions AS SELECT * FROM read_arrow('"
-                    + txFile.toAbsolutePath() + "')");
-        }
+        try (BufferAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
+            DuckDBConnection loadConn = DuckDbFactory.newConnection();
+            try (var stmt = loadConn.createStatement()) {
+                stmt.execute("SET memory_limit='1GB'");
+            }
+            ArrowIpc.load(loadConn, "message",      msgFile, loadAllocator);
+            ArrowIpc.load(loadConn, "remittance",   rmtFile, loadAllocator);
+            ArrowIpc.load(loadConn, "transactions", txFile,  loadAllocator);
 
-        // Step 3: Time DuckDB load and SQL validation
-        try (PaymentRepository repository = new PaymentRepositoryImpl(loadConn)) {
-            duckdbLoadMs = System.currentTimeMillis() - duckdbStart;
+            // Step 3: Time DuckDB load and SQL validation
+            try (PaymentRepository repository = new PaymentRepositoryImpl(loadConn)) {
+                duckdbLoadMs = System.currentTimeMillis() - duckdbStart;
 
-            remittanceRows  = repository.getRemittanceCount();
-            transactionRows = repository.getTransactionCount();
+                remittanceRows  = repository.getRemittanceCount();
+                transactionRows = repository.getTransactionCount();
 
-            // Step 4: Time SQL validation against the loaded DuckDB
-            long valStart = System.nanoTime();
-            ValidationContext ctx = ValidationPipeline.standard().execute(repository);
-            sqlValidationMs = (System.nanoTime() - valStart) / 1_000_000L;
+                // Step 4: Time SQL validation against the loaded DuckDB
+                long valStart = System.nanoTime();
+                ValidationContext ctx = ValidationPipeline.standard().execute(repository);
+                sqlValidationMs = (System.nanoTime() - valStart) / 1_000_000L;
 
-            passed     = !ctx.hasErrors();
-            errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+                passed     = !ctx.hasErrors();
+                errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+            }
         }
 
         return new ValidationResult(
@@ -155,7 +154,7 @@ class ValidationBenchmarkTest {
     }
 
     // -------------------------------------------------------------------------
-    // Arrow file generation (XML → DuckDB → COPY TO (FORMAT arrow))
+    // Arrow file generation (XML → DuckDB → ArrowIpc.export)
     // -------------------------------------------------------------------------
 
     private void generateArrowFiles(Path xmlFile, String base, long allocatorLimit)
@@ -168,17 +167,9 @@ class ValidationBenchmarkTest {
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             PainParser parser = new PainParserImpl();
             parser.parseStreaming(xmlFile, allocator, consumer);
-            try (var stmt = conn.createStatement()) {
-                stmt.execute("COPY message TO '"
-                        + OUTPUT_DIR.resolve(base + "_message.arrow").toAbsolutePath()
-                        + "' (FORMAT arrow)");
-                stmt.execute("COPY remittance TO '"
-                        + OUTPUT_DIR.resolve(base + "_remittance.arrow").toAbsolutePath()
-                        + "' (FORMAT arrow)");
-                stmt.execute("COPY transactions TO '"
-                        + OUTPUT_DIR.resolve(base + "_transaction.arrow").toAbsolutePath()
-                        + "' (FORMAT arrow)");
-            }
+            ArrowIpc.export(conn, "message",      OUTPUT_DIR.resolve(base + "_message.arrow"),     allocator);
+            ArrowIpc.export(conn, "remittance",   OUTPUT_DIR.resolve(base + "_remittance.arrow"),  allocator);
+            ArrowIpc.export(conn, "transactions", OUTPUT_DIR.resolve(base + "_transaction.arrow"), allocator);
             conn.close();
         }
     }
@@ -234,7 +225,7 @@ class ValidationBenchmarkTest {
         System.out.println("╚══════════╩════════════╩══════════════╩══════════════╩═══════════╩══════════════╩═══════════╝");
         System.out.println();
         System.out.println("  Arrow (KB)     = total size of the three .arrow files on disk (message + remittance + transaction)");
-        System.out.println("  DuckDB ms      = time to load Arrow files into in-process DuckDB via read_arrow()");
+        System.out.println("  DuckDB ms      = time to load Arrow files into in-process DuckDB via ArrowIpc.load (C Data Interface)");
         System.out.println("  Validate ms    = time to run ValidationPipeline.standard() against the populated DuckDB tables");
         System.out.println("  rows/ms (val)  = transaction row scan throughput during validation");
         System.out.println();

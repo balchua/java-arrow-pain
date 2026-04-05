@@ -29,9 +29,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * <ol>
  *   <li>Generates the XML if absent</li>
  *   <li>Parses XML to DuckDB using streaming pipeline, then exports three Arrow files
- *       (message, remittance, transaction) via {@code COPY TO (FORMAT arrow)}</li>
+ *       (message, remittance, transaction) via {@link ArrowIpc#export} (C Data Interface,
+ *       no extension required)</li>
  *   <li>Simulates a downstream consumer: loads the .arrow files back into a fresh
- *       in-process DuckDB using {@code read_arrow()}</li>
+ *       in-process DuckDB using {@link ArrowIpc#load}</li>
  *   <li>Records per-table file sizes and DuckDB load time</li>
  * </ol>
  */
@@ -93,7 +94,7 @@ class ArrowFileLoadBenchmarkTest {
         // Step 1: Generate XML if absent
         Path xmlFile = TestFileGenerator.generateIfAbsent(spec);
 
-        // Step 2: Parse XML using streaming pipeline and export three Arrow files via DuckDB COPY TO
+        // Step 2: Parse XML using streaming pipeline and export three Arrow files via ArrowIpc
         Files.createDirectories(OUTPUT_DIR);
         String base = spec.fileName().replaceAll("\\.[xX][mM][lL]$", "");
 
@@ -110,11 +111,9 @@ class ArrowFileLoadBenchmarkTest {
                 StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
                 PainParser parser = new PainParserImpl();
                 parser.parseStreaming(xmlFile, allocator, consumer);
-                try (var stmt = conn.createStatement()) {
-                    stmt.execute("COPY message TO '" + msgFile.toAbsolutePath() + "' (FORMAT arrow)");
-                    stmt.execute("COPY remittance TO '" + rmtFile.toAbsolutePath() + "' (FORMAT arrow)");
-                    stmt.execute("COPY transactions TO '" + txFile.toAbsolutePath() + "' (FORMAT arrow)");
-                }
+                ArrowIpc.export(conn, "message",      msgFile, allocator);
+                ArrowIpc.export(conn, "remittance",   rmtFile, allocator);
+                ArrowIpc.export(conn, "transactions", txFile,  allocator);
                 conn.close();
             }
         }
@@ -123,26 +122,25 @@ class ArrowFileLoadBenchmarkTest {
         long rmtBytes = Files.size(rmtFile);
         long txBytes  = Files.size(txFile);
 
-        // Step 3: Simulate downstream consumer — load .arrow files into a fresh DuckDB via read_arrow()
+        // Step 3: Simulate downstream consumer — load .arrow files into a fresh DuckDB via ArrowIpc
         long remittanceRows;
         long transactionRows;
         long loadTimeMs;
 
         long start = System.currentTimeMillis();
-        DuckDBConnection loadConn = DuckDbFactory.newConnection();
-        try (var stmt = loadConn.createStatement()) {
-            stmt.execute("SET memory_limit='1GB'");
-            stmt.execute("CREATE TABLE message AS SELECT * FROM read_arrow('"
-                    + msgFile.toAbsolutePath() + "')");
-            stmt.execute("CREATE TABLE remittance AS SELECT * FROM read_arrow('"
-                    + rmtFile.toAbsolutePath() + "')");
-            stmt.execute("CREATE TABLE transactions AS SELECT * FROM read_arrow('"
-                    + txFile.toAbsolutePath() + "')");
-        }
-        try (PaymentRepository repo = new PaymentRepositoryImpl(loadConn)) {
-            loadTimeMs      = System.currentTimeMillis() - start;
-            remittanceRows  = repo.getRemittanceCount();
-            transactionRows = repo.getTransactionCount();
+        try (BufferAllocator loadAllocator = new RootAllocator(allocatorLimit)) {
+            DuckDBConnection loadConn = DuckDbFactory.newConnection();
+            try (var stmt = loadConn.createStatement()) {
+                stmt.execute("SET memory_limit='1GB'");
+            }
+            ArrowIpc.load(loadConn, "message",      msgFile, loadAllocator);
+            ArrowIpc.load(loadConn, "remittance",   rmtFile, loadAllocator);
+            ArrowIpc.load(loadConn, "transactions", txFile,  loadAllocator);
+            try (PaymentRepository repo = new PaymentRepositoryImpl(loadConn)) {
+                loadTimeMs      = System.currentTimeMillis() - start;
+                remittanceRows  = repo.getRemittanceCount();
+                transactionRows = repo.getTransactionCount();
+            }
         }
 
         return new BenchmarkResult(spec.name(), msgBytes, rmtBytes, txBytes,

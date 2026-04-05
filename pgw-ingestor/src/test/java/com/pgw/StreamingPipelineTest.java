@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for the streaming pipeline: memory footprint, DuckDB row count correctness,
- * Arrow file export via DuckDB COPY TO, and output directory configuration.
+ * extension-less Arrow file export via {@link ArrowIpc}, and output directory configuration.
  */
 class StreamingPipelineTest {
 
@@ -94,7 +94,7 @@ class StreamingPipelineTest {
     }
 
     @Test
-    @DisplayName("Streaming pipeline: DuckDB COPY TO exports readable .arrow files")
+    @DisplayName("Streaming pipeline: ArrowIpc.export writes readable .arrow files (no extension)")
     void testArrowFilesExported(@TempDir Path tempDir) throws Exception {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
@@ -105,16 +105,14 @@ class StreamingPipelineTest {
             PainParser parser = new PainParserImpl();
             parser.parseStreaming(xmlFile, allocator, consumer);
 
-            // Export Arrow files via DuckDB COPY TO
+            // Export Arrow files via ArrowIpc (extension-less, C Data Interface)
             Path msgFile = tempDir.resolve("test_message.arrow");
             Path rmtFile = tempDir.resolve("test_remittance.arrow");
             Path txFile  = tempDir.resolve("test_transaction.arrow");
 
-            try (var stmt = conn.createStatement()) {
-                stmt.execute("COPY message TO '" + msgFile.toAbsolutePath() + "' (FORMAT arrow)");
-                stmt.execute("COPY remittance TO '" + rmtFile.toAbsolutePath() + "' (FORMAT arrow)");
-                stmt.execute("COPY transactions TO '" + txFile.toAbsolutePath() + "' (FORMAT arrow)");
-            }
+            ArrowIpc.export(conn, "message",      msgFile, allocator);
+            ArrowIpc.export(conn, "remittance",   rmtFile, allocator);
+            ArrowIpc.export(conn, "transactions", txFile,  allocator);
             conn.close();
 
             // Verify files exist and are non-empty
@@ -125,16 +123,12 @@ class StreamingPipelineTest {
             assertTrue(Files.size(rmtFile) > 0, "remittance .arrow file must not be empty");
             assertTrue(Files.size(txFile)  > 0, "transaction .arrow file must not be empty");
 
-            // Verify files are loadable with DuckDB read_arrow() and row counts match
+            // Verify files are loadable with ArrowIpc.load and row counts match
             DuckDBConnection loadConn = DuckDbFactory.newConnection();
-            try (var stmt = loadConn.createStatement()) {
-                stmt.execute("CREATE TABLE msg AS SELECT * FROM read_arrow('"
-                        + msgFile.toAbsolutePath() + "')");
-                stmt.execute("CREATE TABLE rmt AS SELECT * FROM read_arrow('"
-                        + rmtFile.toAbsolutePath() + "')");
-                stmt.execute("CREATE TABLE txs AS SELECT * FROM read_arrow('"
-                        + txFile.toAbsolutePath() + "')");
-            }
+            ArrowIpc.load(loadConn, "msg", msgFile, allocator);
+            ArrowIpc.load(loadConn, "rmt", rmtFile, allocator);
+            ArrowIpc.load(loadConn, "txs", txFile,  allocator);
+
             try (var stmt = loadConn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM msg")) {
                 assertTrue(rs.next() && rs.getLong(1) > 0, "message file must have at least one row");
@@ -154,7 +148,7 @@ class StreamingPipelineTest {
     }
 
     @Test
-    @DisplayName("Streaming pipeline: DuckDB COPY TO respects the given output path")
+    @DisplayName("Streaming pipeline: ArrowIpc.export respects the given output path")
     void testOutputPathParameter(@TempDir Path tempDir) throws Exception {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
@@ -167,14 +161,9 @@ class StreamingPipelineTest {
             PainParser parser = new PainParserImpl();
             parser.parseStreaming(xmlFile, allocator, consumer);
 
-            try (var stmt = conn.createStatement()) {
-                stmt.execute("COPY message TO '"
-                        + customDir.resolve("test_message.arrow").toAbsolutePath() + "' (FORMAT arrow)");
-                stmt.execute("COPY remittance TO '"
-                        + customDir.resolve("test_remittance.arrow").toAbsolutePath() + "' (FORMAT arrow)");
-                stmt.execute("COPY transactions TO '"
-                        + customDir.resolve("test_transaction.arrow").toAbsolutePath() + "' (FORMAT arrow)");
-            }
+            ArrowIpc.export(conn, "message",      customDir.resolve("test_message.arrow"),     allocator);
+            ArrowIpc.export(conn, "remittance",   customDir.resolve("test_remittance.arrow"),  allocator);
+            ArrowIpc.export(conn, "transactions", customDir.resolve("test_transaction.arrow"), allocator);
             conn.close();
         }
 
@@ -186,3 +175,4 @@ class StreamingPipelineTest {
                 "transaction .arrow file must exist in custom directory");
     }
 }
+

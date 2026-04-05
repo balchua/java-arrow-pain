@@ -27,7 +27,7 @@ import java.time.Instant;
  * <p>Usage: {@code App <pain001.xml>}</p>
  *
  * <p>Pipeline: XML → Arrow (streaming parse) → DuckDB (live INSERT) →
- * DuckDB COPY TO (FORMAT arrow) → .arrow files → SQL validation → report</p>
+ * ArrowIpc.export (C Data Interface, no extension) → .arrow files → SQL validation → report</p>
  */
 public final class App {
 
@@ -132,11 +132,9 @@ public final class App {
                 benchmark.setOffHeapPeakBytes(allocator.getPeakMemoryAllocation());
 
                 Instant writeStart = Instant.now();
-                try (var stmt = conn.createStatement()) {
-                    stmt.execute("COPY message TO '" + msgPath + "' (FORMAT arrow)");
-                    stmt.execute("COPY remittance TO '" + rmtPath + "' (FORMAT arrow)");
-                    stmt.execute("COPY transactions TO '" + txPath + "' (FORMAT arrow)");
-                }
+                ArrowIpc.export(conn, "message",      msgPath, allocator);
+                ArrowIpc.export(conn, "remittance",   rmtPath, allocator);
+                ArrowIpc.export(conn, "transactions", txPath,  allocator);
                 Duration writeDuration = Duration.between(writeStart, Instant.now());
                 benchmark.recordPhase("Arrow File Export", writeDuration);
 

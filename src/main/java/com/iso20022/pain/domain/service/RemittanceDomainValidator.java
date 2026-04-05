@@ -11,7 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Pure-Java domain validator for ISO 20022 PaymentInformation (PmtInf) fields.
@@ -30,10 +29,10 @@ public final class RemittanceDomainValidator implements Validator {
 
     @Override
     public void validate(PaymentRepository repository, ValidationContext context) {
-        AtomicReference<String> currentMsgId = new AtomicReference<>();
+        String[] currentMsgId = {null};
         try {
             repository.streamMessages(msg -> {
-                currentMsgId.set(msg.messageId());
+                currentMsgId[0] = msg.messageId();
                 try {
                     repository.streamRemittances(msg.messageId(), rmt -> {
                         String rmtId = rmt.remittanceId();
@@ -59,9 +58,9 @@ public final class RemittanceDomainValidator implements Validator {
                     });
                 } catch (SQLException e) {
                     LOG.error("{} failed streaming remittances for {}: {}",
-                            getName(), currentMsgId.get(), e.getMessage(), e);
+                            getName(), currentMsgId[0], e.getMessage(), e);
                     context.addError(getName(), "Failed to stream remittances",
-                            currentMsgId.get(), e.getMessage());
+                            currentMsgId[0], e.getMessage());
                 }
             });
             LOG.debug("{} completed", getName());

@@ -37,6 +37,7 @@ public final class ControlSumDomainService implements Validator {
 
                 try {
                     ControlSum msgControlSum = new ControlSum(msg.controlSum());
+                    BigDecimal[] grandTotal = {BigDecimal.ZERO};
 
                     repository.streamRemittances(msgId, rmt -> {
                         String rmtId = rmt.remittanceId();
@@ -49,7 +50,9 @@ public final class ControlSumDomainService implements Validator {
                                 try {
                                     Amount txAmount = new Amount(
                                             tx.instructedAmount(), new Currency(tx.currency()));
-                                    rmtTotal[0] = rmtTotal[0].add(txAmount.value());
+                                    BigDecimal txValue = txAmount.value();
+                                    rmtTotal[0] = rmtTotal[0].add(txValue);
+                                    grandTotal[0] = grandTotal[0].add(txValue);
                                 } catch (InvalidCurrencyException | InvalidAmountException e) {
                                     // skip invalid transactions — TransactionDomainValidator reports these
                                 }
@@ -70,26 +73,6 @@ public final class ControlSumDomainService implements Validator {
                                     getName(), rmtId, e.getMessage(), e);
                             context.addError(getName(), "Failed to stream transactions",
                                     rmtId, e.getMessage());
-                        }
-                    });
-
-                    // Accumulate remittance totals for the message-level check.
-                    // Re-stream to compute the grand total (avoids holding all sums in memory).
-                    BigDecimal[] grandTotal = {BigDecimal.ZERO};
-                    repository.streamRemittances(msgId, rmt -> {
-                        try {
-                            repository.streamTransactions(rmt.remittanceId(), tx -> {
-                                try {
-                                    Amount txAmount = new Amount(
-                                            tx.instructedAmount(), new Currency(tx.currency()));
-                                    grandTotal[0] = grandTotal[0].add(txAmount.value());
-                                } catch (InvalidCurrencyException | InvalidAmountException e) {
-                                    // skip invalid transactions
-                                }
-                            });
-                        } catch (SQLException e) {
-                            LOG.error("{} failed re-streaming transactions: {}",
-                                    getName(), e.getMessage(), e);
                         }
                     });
 

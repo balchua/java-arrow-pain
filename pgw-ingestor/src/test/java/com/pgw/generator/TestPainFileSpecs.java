@@ -32,4 +32,14 @@ public final class TestPainFileSpecs {
     public static final PainFileSpec TYPE_E = new PainFileSpec(
             "Type E (2 PmtInf × 100 TxInf — invalid CtrlSum)",
             "pain001_type_e_2x100_invalid_ctrlsum.xml", 2, 100, true);
+
+    /** Type F: 1 PmtInf × 2,000,000 CdtTrfTxInf — single remittance, 2M transactions. */
+    public static final PainFileSpec TYPE_F = new PainFileSpec(
+            "Type F (1 PmtInf × 2,000,000 TxInf)",
+            "pain001_type_f_1x2M.xml", 1, 2_000_000);
+
+    /** Type G: 1 PmtInf × 4,000,000 CdtTrfTxInf — single remittance, 4M transactions. */
+    public static final PainFileSpec TYPE_G = new PainFileSpec(
+            "Type G (1 PmtInf × 4,000,000 TxInf)",
+            "pain001_type_g_1x4M.xml", 1, 4_000_000);
 }

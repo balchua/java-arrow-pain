@@ -123,15 +123,17 @@ Reports DuckDB registration time and SQL validation time as two **separate colum
 
 | Type | Arrow (KB) | DuckDB ms | Validate ms | Tx Rows | rows/ms | Result |
 |------|----------:|----------:|------------:|--------:|--------:|--------|
-| A — 1×1M txns | 229,806 | 380 | 79 | 1,000,000 | 12,658 | ✓ PASSED |
-| B — 2×500K txns | 229,698 | 379 | 79 | 1,000,000 | 12,658 | ✓ PASSED |
-| C — 1M×1 txns | 370,767 | 714 | 321 | 1,000,000 | 3,115 | ✓ PASSED |
-| D — 2×100 (valid) | <1 | 2 | 4 | 200 | — | ✓ PASSED |
-| E — 2×100 (invalid CtrlSum) | <1 | 2 | 4 | 200 | — | ✗ FAILED (3 errors) |
+| A — 1×1M txns | 301,712 | 1,160 | 84 | 1,000,000 | 11,905 | ✓ PASSED |
+| B — 2×500K txns | 301,604 | 589 | 82 | 1,000,000 | 12,195 | ✓ PASSED |
+| C — 1M×1 txns | 506,780 | 1,194 | 307 | 1,000,000 | 3,257 | ✓ PASSED |
+| D — 2×100 (valid) | 65 | 16 | 7 | 200 | 29 | ✓ PASSED |
+| E — 2×100 (invalid CtrlSum) | 65 | 14 | 10 | 200 | 20 | ✗ FAILED (3 errors) |
+| **TOTAL** | **1,110,226** | **2,973** | **490** | **3,000,400** | **6,123** | — |
 
 **Key insight:**
-- DuckDB registration (`loadViaStream`) takes **380–714 ms** for 1M rows.
-- SQL validation adds only **79–321 ms** on top of that.
+- DuckDB registration (`loadViaStream`) takes **589–1,194 ms** for 1M rows.
+- SQL validation adds only **82–307 ms** on top of that.
+- Across all 5 types (3M+ rows total): **2,973 ms** DuckDB load + **490 ms** SQL validation.
 - Type E correctly reports 3 control-sum errors (2 remittance-level + 1 message-level).
 
 ---

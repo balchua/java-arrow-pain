@@ -241,6 +241,10 @@ class ValidationBenchmarkTest {
         System.out.println(SEP.replace('╠', '╠').replace('╣', '╣'));
         System.out.println("║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║  Tx Rows  ║ rows/ms (val)║  Result   ║");
         System.out.println(SEP.replace('╦', '╬'));
+        long totalDuckdbMs   = 0;
+        long totalValidateMs = 0;
+        long totalTxRows     = 0;
+        long totalArrowKb    = 0;
         for (ValidationResult r : results) {
             double rowsPerMs = r.sqlValidationMs() > 0
                     ? (double) r.transactionRows() / r.sqlValidationMs()
@@ -256,7 +260,22 @@ class ValidationBenchmarkTest {
                     String.format("%,d", r.transactionRows()),
                     String.format("%,.0f", rowsPerMs),
                     resultStr);
+            totalDuckdbMs   += r.duckdbLoadMs();
+            totalValidateMs += r.sqlValidationMs();
+            totalTxRows     += r.transactionRows();
+            totalArrowKb    += r.totalArrowBytes() / 1024;
         }
+        System.out.println("╠══════════╬════════════╬══════════════╬══════════════╬═══════════╬══════════════╬═══════════╣");
+        double totalRowsPerMs = totalValidateMs > 0
+                ? (double) totalTxRows / totalValidateMs : (double) totalTxRows;
+        System.out.printf("║  %-8s ║ %10s ║ %12s ║ %12s ║ %9s ║ %12s ║ %-9s ║%n",
+                "TOTAL",
+                String.format("%,d", totalArrowKb),
+                String.format("%,d", totalDuckdbMs),
+                String.format("%,d", totalValidateMs),
+                String.format("%,d", totalTxRows),
+                String.format("%,.0f", totalRowsPerMs),
+                "—");
         System.out.println("╚══════════╩════════════╩══════════════╩══════════════╩═══════════╩══════════════╩═══════════╝");
         System.out.println();
         System.out.println("  Arrow (KB)     = total size of the three .arrows files on disk (message + remittance + transaction)");

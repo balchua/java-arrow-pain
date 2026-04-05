@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -120,7 +119,7 @@ class ValidationBenchmarkTest {
         int errorCount;
 
         long duckdbStart = System.currentTimeMillis();
-        DuckDBConnection loadConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+        DuckDBConnection loadConn = DuckDbFactory.newConnection();
         try (var stmt = loadConn.createStatement()) {
             stmt.execute("SET memory_limit='1GB'");
             stmt.execute("CREATE TABLE message AS SELECT * FROM read_arrow('"
@@ -162,7 +161,7 @@ class ValidationBenchmarkTest {
     private void generateArrowFiles(Path xmlFile, String base, long allocatorLimit)
             throws Exception {
         try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
-            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection conn = DuckDbFactory.newConnection();
             try (var stmt = conn.createStatement()) {
                 stmt.execute("SET memory_limit='1GB'");
             }

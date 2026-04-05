@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -104,7 +103,7 @@ class ArrowFileLoadBenchmarkTest {
 
         if (!Files.exists(msgFile) || !Files.exists(rmtFile) || !Files.exists(txFile)) {
             try (BufferAllocator allocator = new RootAllocator(allocatorLimit)) {
-                DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+                DuckDBConnection conn = DuckDbFactory.newConnection();
                 try (var stmt = conn.createStatement()) {
                     stmt.execute("SET memory_limit='1GB'");
                 }
@@ -130,7 +129,7 @@ class ArrowFileLoadBenchmarkTest {
         long loadTimeMs;
 
         long start = System.currentTimeMillis();
-        DuckDBConnection loadConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+        DuckDBConnection loadConn = DuckDbFactory.newConnection();
         try (var stmt = loadConn.createStatement()) {
             stmt.execute("SET memory_limit='1GB'");
             stmt.execute("CREATE TABLE message AS SELECT * FROM read_arrow('"

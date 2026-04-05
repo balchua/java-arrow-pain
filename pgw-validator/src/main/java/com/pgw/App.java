@@ -18,7 +18,6 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -106,7 +105,7 @@ public final class App {
 
                 PainParser parser = new PainParserImpl();
 
-                DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+                DuckDBConnection conn = DuckDbFactory.newConnection();
                 try (var stmt = conn.createStatement()) {
                     stmt.execute("SET memory_limit='1GB'");
                 }

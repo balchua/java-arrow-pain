@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.sql.DriverManager;
 import java.util.LongSummaryStatistics;
 import java.util.stream.LongStream;
 
@@ -69,8 +68,7 @@ class MemoryLeakVerificationTest {
             for (int i = 0; i < iterations; i++) {
                 long t0 = System.currentTimeMillis();
 
-                DuckDBConnection conn = (DuckDBConnection)
-                        DriverManager.getConnection("jdbc:duckdb:");
+                DuckDBConnection conn = DuckDbFactory.newConnection();
                 try (var stmt = conn.createStatement()) {
                     stmt.execute("SET memory_limit='512MB'");
                 }

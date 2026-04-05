@@ -202,6 +202,12 @@ Arrow type mappings follow ISO 20022 data type definitions:
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn clean package -DskipTests
 
+# ── Arrow extension (first run only) ──────────────────────────────────────────
+# DuckDB's COPY TO (FORMAT arrow) and read_arrow() require the DuckDB Arrow
+# community extension.  DuckDbFactory.newConnection() auto-installs and loads
+# it on every new connection — internet access is needed the first time.
+# The extension is cached in ~/.duckdb/extensions/ for subsequent runs.
+
 # ── Run the application (no benchmark) ────────────────────────────────────────
 
 # Writes .arrow files to src/main/resources/output/
@@ -213,7 +219,9 @@ PAIN_LOCAL_OUTPUT_DIR=/data/arrows \
   MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
 
-# ── Run tests (without the large benchmarks) ──────────────────────────────────
+# ── Run tests and see benchmark table output in the console ───────────────────
+# Both module POMs set redirectTestOutputToFile=false so System.out from
+# JUnit tests (the benchmark tables) is printed directly to the console.
 
 # Fast tests only — no large file generation (Types D + E, ~200 rows each, < 5 s)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
@@ -223,11 +231,11 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 # Validation-stage benchmark only (Arrow → DuckDB load + SQL validation)
 # Generates Types A–E Arrow files if absent; runs quickly once files exist
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
-  mvn test -pl pgw-ingestor,pgw-validator -Dtest=ValidationBenchmarkTest
+  mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest
 
 # Arrow → DuckDB load benchmark only (no validation)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
-  mvn test -pl pgw-ingestor,pgw-validator -Dtest=ArrowFileLoadBenchmarkTest
+  mvn test -pl pgw-validator -Dtest=ArrowFileLoadBenchmarkTest
 
 # ── Run the full test suite (all benchmarks) ──────────────────────────────────
 

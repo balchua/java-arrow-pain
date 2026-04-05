@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
-import java.sql.DriverManager;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,7 +35,7 @@ class ValidationTest {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection conn = DuckDbFactory.newConnection();
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             new PainParserImpl().parseStreaming(file, allocator, consumer);
             try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {
@@ -54,7 +53,7 @@ class ValidationTest {
         Path file = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_E);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection conn = DuckDbFactory.newConnection();
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             new PainParserImpl().parseStreaming(file, allocator, consumer);
             try (PaymentRepository repository = new PaymentRepositoryImpl(conn)) {

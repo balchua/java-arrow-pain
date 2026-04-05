@@ -16,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,8 +36,7 @@ class StreamingPipelineTest {
         long peakOffHeap = 0;
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = (DuckDBConnection)
-                    DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection conn = DuckDbFactory.newConnection();
 
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
 
@@ -69,8 +67,7 @@ class StreamingPipelineTest {
         Path xmlFile = TestFileGenerator.generateIfAbsent(TestPainFileSpecs.TYPE_D);
 
         ParseStats stats;
-        DuckDBConnection conn = (DuckDBConnection)
-                DriverManager.getConnection("jdbc:duckdb:");
+        DuckDBConnection conn = DuckDbFactory.newConnection();
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
@@ -103,8 +100,7 @@ class StreamingPipelineTest {
 
         // Parse and populate DuckDB
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = (DuckDBConnection)
-                    DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection conn = DuckDbFactory.newConnection();
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             PainParser parser = new PainParserImpl();
             parser.parseStreaming(xmlFile, allocator, consumer);
@@ -130,7 +126,7 @@ class StreamingPipelineTest {
             assertTrue(Files.size(txFile)  > 0, "transaction .arrow file must not be empty");
 
             // Verify files are loadable with DuckDB read_arrow() and row counts match
-            DuckDBConnection loadConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection loadConn = DuckDbFactory.newConnection();
             try (var stmt = loadConn.createStatement()) {
                 stmt.execute("CREATE TABLE msg AS SELECT * FROM read_arrow('"
                         + msgFile.toAbsolutePath() + "')");
@@ -166,8 +162,7 @@ class StreamingPipelineTest {
         Files.createDirectories(customDir);
 
         try (BufferAllocator allocator = new RootAllocator(ALLOCATOR_LIMIT)) {
-            DuckDBConnection conn = (DuckDBConnection)
-                    DriverManager.getConnection("jdbc:duckdb:");
+            DuckDBConnection conn = DuckDbFactory.newConnection();
             StreamingBatchConsumer consumer = new StreamingBatchConsumer(conn, allocator);
             PainParser parser = new PainParserImpl();
             parser.parseStreaming(xmlFile, allocator, consumer);

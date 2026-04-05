@@ -117,7 +117,6 @@ pgw-validator/src/test/java/com/pgw/
 ├── ArrowFileLoadBenchmarkTest.java   # JUnit 5: Arrow IPC Stream → DuckDB load speed benchmark
 ├── ValidationBenchmarkTest.java      # JUnit 5: Arrow→DuckDB registration + SQL validation metrics
 ├── MemoryLeakVerificationTest.java   # JUnit 5: 50-iteration leak verification
-├── FullPipelineBenchmarkTest.java    # JUnit 5: Full streaming pipeline A–E benchmark
 ├── SampleGeneratorRunner.java        # Runnable main: generate by type (a–e)
 └── generator/
     ├── PainXmlGenerator.java         # Interface: generate(PainFileSpec, Path) → Path
@@ -130,7 +129,6 @@ pgw-validator/src/test/java/com/pgw/
 |------------|-----------------|
 | `ArrowFileLoadBenchmarkTest` | Arrow IPC Stream → DuckDB load time only (no validation) |
 | `ValidationBenchmarkTest` | Arrow IPC Stream → DuckDB load time **+ SQL validation time** |
-| `FullPipelineBenchmarkTest` | End-to-end: XML parse → live DuckDB INSERT (pipelined) → Arrow write → SQL validate |
 
 ---
 

@@ -409,6 +409,86 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
         return BigDecimal.ZERO;
     }
 
+    // ── Streaming domain-object access ───────────────────────────────────────
+
+    @Override
+    public synchronized void streamMessages(java.util.function.Consumer<com.iso20022.pain.domain.model.Message> handler)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT msg_id, msg_cre_dt_tm, msg_nb_of_txs, msg_ctrl_sum, msg_initg_pty_nm"
+                        + " FROM message")) {
+            ps.setFetchSize(100);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    handler.accept(new com.iso20022.pain.domain.model.Message(
+                            rs.getString(1),
+                            rs.getString(2),
+                            rs.getString(3),
+                            rs.getBigDecimal(4),
+                            rs.getString(5)));
+                }
+            }
+        }
+    }
+
+    @Override
+    public synchronized void streamRemittances(String messageId,
+            java.util.function.Consumer<com.iso20022.pain.domain.model.Remittance> handler)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT msg_id, pmt_inf_id, pmt_mtd, nb_of_txs, ctrl_sum, svc_lvl_cd,"
+                        + " reqd_exctn_dt, dbtr_nm, dbtr_acct_iban, dbtr_agt_bicfi"
+                        + " FROM remittance WHERE msg_id = ?")) {
+            ps.setFetchSize(100);
+            ps.setString(1, messageId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    java.sql.Date sqlDate = rs.getDate(7);
+                    java.time.LocalDate execDate = sqlDate != null ? sqlDate.toLocalDate() : null;
+                    handler.accept(new com.iso20022.pain.domain.model.Remittance(
+                            rs.getString(1),
+                            rs.getString(2),
+                            rs.getString(3),
+                            rs.getString(4),
+                            rs.getBigDecimal(5),
+                            rs.getString(6),
+                            execDate,
+                            rs.getString(8),
+                            rs.getString(9),
+                            rs.getString(10)));
+                }
+            }
+        }
+    }
+
+    @Override
+    public synchronized void streamTransactions(String remittanceId,
+            java.util.function.Consumer<com.iso20022.pain.domain.model.Transaction> handler)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT pmt_inf_id, instr_id, end_to_end_id, instd_amt, ccy,"
+                        + " cdtr_agt_bicfi, cdtr_nm, cdtr_acct_iban, rmt_inf_ustrd, rglty_rptg_cd"
+                        + " FROM transactions WHERE pmt_inf_id = ?")) {
+            ps.setFetchSize(1000);
+            ps.setString(1, remittanceId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    handler.accept(new com.iso20022.pain.domain.model.Transaction(
+                            rs.getString(1),
+                            rs.getString(2),
+                            rs.getString(3),
+                            rs.getBigDecimal(4),
+                            rs.getString(5),
+                            rs.getString(6),
+                            rs.getString(7),
+                            rs.getString(8),
+                            rs.getString(9),
+                            rs.getString(10)));
+                }
+            }
+        }
+    }
+
     @Override
     public void close() throws Exception {
         // Close DuckDB connection FIRST — this invokes all C Data Interface release

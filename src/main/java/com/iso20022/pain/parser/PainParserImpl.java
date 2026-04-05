@@ -32,7 +32,7 @@ import java.time.format.DateTimeFormatter;
  * </p>
  * <ol>
  * <li><b>Message</b> — one row per GrpHdr (GroupHeader85)</li>
- * <li><b>Remittance</b> — one row per PmtInf (PaymentInstruction30), streamed per batch</li>
+ * <li><b>Remittance</b> — one row per PmtInf (PaymentInformation30), streamed per batch</li>
  * <li><b>Transaction</b> — one row per CdtTrfTxInf (CreditTransferTransaction34), streamed per batch</li>
  * </ol>
  */

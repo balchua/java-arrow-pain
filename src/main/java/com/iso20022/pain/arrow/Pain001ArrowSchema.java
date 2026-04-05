@@ -12,8 +12,7 @@ import java.util.List;
  * Defines three Apache Arrow schemas for ISO 20022 pain.001.001.09:
  * <ol>
  * <li><b>Message</b> — one row per GroupHeader (GrpHdr / GroupHeader85)</li>
- * <li><b>Remittance</b> — one row per PaymentInformation (PmtInf /
- * PaymentInstruction30)</li>
+ * <li><b>Remittance</b> — one row per PaymentInformation (PmtInf)</li>
  * <li><b>Transaction</b> — one row per CreditTransferTransaction (CdtTrfTxInf /
  * CreditTransferTransaction34)</li>
  * </ol>
@@ -103,7 +102,7 @@ public final class Pain001ArrowSchema {
     public static final String MSG_INITG_PTY_NM = "msg_initg_pty_nm";
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Remittance (PaymentInstruction30) field names
+    // Remittance (PmtInf) field names
     // ═══════════════════════════════════════════════════════════════════════════
 
     /** Foreign key → Message.msg_id */

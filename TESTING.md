@@ -1,60 +1,105 @@
 # Testing Guide
 
-This document describes the testing infrastructure for comparing validation framework performance across code changes.
+This document describes the testing infrastructure for the PGW multi-module project.
+
+---
 
 ## Quick Start
 
 ```bash
-# Run the standardized test suite
+# Run the full standardized test suite (generates samples, runs all benchmarks)
 ./run_validation_tests.sh
 ```
 
-Results are saved to `test-results/test_run_YYYYMMDD_HHMMSS.log`
+Results are saved to `test-results/test_run_YYYYMMDD_HHMMSS.log`.
 
-## Test Infrastructure
+---
 
-### Files
+## Module Layout
 
-| File | Purpose |
-|------|---------|
-| `run_validation_tests.sh` | Automated test execution script |
-| `TEST_RESULTS.md` | Current baseline test results and comparison |
-| `test-results/` | Directory for test output logs (gitignored) |
-| `TESTING.md` | This file - testing documentation |
+```
+pain001-arrow-loader/    ← parent POM
+├── pgw-ingestor/        ← XML → Arrow → DuckDB (no tests — tested via pgw-validator)
+└── pgw-validator/       ← validation domain + App + ALL tests
+    └── src/test/java/com/pgw/
+        ├── SampleGenerationTest.java       # generates + validates Type D & E
+        ├── StreamingPipelineTest.java      # memory footprint, row counts, .arrows output
+        ├── ArrowFileLoadBenchmarkTest.java # downstream consumer: .arrows → DuckDB load speed
+        ├── MemoryLeakVerificationTest.java # 50-iteration leak check (0 bytes leaked)
+        ├── FullPipelineBenchmarkTest.java  # end-to-end: XML→Arrow→DuckDB→validate, types A–E
+        ├── SampleGeneratorRunner.java      # standalone runner: generate sample files by type
+        └── generator/
+            ├── PainXmlGenerator.java       # generator interface
+            ├── PainXmlGeneratorImpl.java   # StAX implementation
+            ├── TestPainFileSpecs.java      # type constants A–E
+            └── TestFileGenerator.java      # generate-if-absent + tail-check
+```
 
-### What Gets Tested
+---
 
-The test suite:
-1. Compiles the project (`mvn clean compile`)
-2. Generates test XML files (Type A, B, C)
-3. Parses XML into Arrow format using streaming pipeline
-4. Runs validation pipeline with all validators
-5. Streams Arrow IPC batches via PersistenceService (local or S3)
-6. Captures complete benchmark results
+## Running Tests
 
-### Configuration
+### Build and test all modules
 
-See the [Configuration](README.md#configuration) section in README.md for the environment variables
-that control the persistence mode and output directory:
+```bash
+export JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64
+export PATH=$JAVA_HOME/bin:$PATH
+
+# All tests (generates Type D and E automatically; A–C generated on demand)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn test -pl pgw-validator --also-make
+```
+
+### Run a specific test
+
+```bash
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-validator --also-make -Dtest=ArrowFileLoadBenchmarkTest
+
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn test -pl pgw-validator --also-make -Dtest=FullPipelineBenchmarkTest
+```
+
+### Generate sample files manually
+
+```bash
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -pl pgw-validator \
+    -Dexec.mainClass="com.pgw.SampleGeneratorRunner" \
+    -Dexec.args="type-d type-e"
+```
+
+Sample files are written to `pgw-validator/src/test/resources/sample-data/`.
+
+---
+
+## Test Files
+
+| Type | File | Remittances | Txns/Block | Total Txns | Purpose |
+|------|------|-------------|------------|------------|---------|
+| A | `pain001_type_a_1x1M.xml` | 1 | 1,000,000 | 1,000,000 | Fat batch benchmark |
+| B | `pain001_type_b_2x500K.xml` | 2 | 500,000 | 1,000,000 | Multi-batch benchmark |
+| C | `pain001_type_c_1Mx1.xml` | 1,000,000 | 1 | 1,000,000 | Adversarial (max overhead) |
+| D | `pain001_type_d_2x100_valid.xml` | 2 | 100 | 200 | Valid — fast unit test |
+| E | `pain001_type_e_2x100_invalid_ctrlsum.xml` | 2 | 100 | 200 | Invalid control sum — negative test |
+
+> Types A–C (~516–888 MB) are not committed to the repo. They are generated on first test run.
+> Types D–E are small (<110 KB) and generated automatically by `mvn test`.
+
+---
+
+## Configuration
 
 | Env var | Default | Description |
-|---|---|---|
+|---------|---------|-------------|
 | `PAIN_PERSISTENCE_MODE` | `local` | `local` or `s3` |
-| `PAIN_LOCAL_OUTPUT_DIR` | `src/main/resources/output` | Local output directory for Arrow IPC Stream files |
+| `PAIN_LOCAL_OUTPUT_DIR` | _(module resource dir)_ | Local output directory for Arrow IPC Stream files |
 | `PAIN_S3_BUCKET` | _(required for s3)_ | Target S3 bucket name |
-| `PAIN_S3_KEY_PREFIX` | `pain001` | S3 key prefix (folder) |
+| `PAIN_S3_KEY_PREFIX` | `pain001` | S3 key prefix |
 
-### Test Files
+---
 
-| File | Structure | Rows | Purpose |
-|------|-----------|------|---------|
-| Type A | 1×1M | 1M transactions, 1 remittance | Fat batch scenario |
-| Type B | 2×500K | 1M transactions, 2 remittances | Multiple batches |
-| Type C | 1M×1 | 1M transactions, 1M remittances | Adversarial (max overhead) |
-
-## Comparing Changes
-
-### Before/After Workflow
+## Before/After Comparison Workflow
 
 ```bash
 # 1. Establish baseline BEFORE changes
@@ -62,175 +107,67 @@ that control the persistence mode and output directory:
 BASELINE=test-results/test_run_$(date +%Y%m%d_%H%M%S).log
 
 # 2. Make your code changes
-# ... edit files ...
 
-# 3. Run tests AFTER changes
+# 3. Run AFTER changes
 ./run_validation_tests.sh
 AFTER=test-results/test_run_$(date +%Y%m%d_%H%M%S).log
 
-# 4. Compare results
-diff -u $BASELINE $AFTER | less
-
-# Or extract specific metrics
-echo "=== Baseline ==="
-grep "Validation.*ms" $BASELINE
-echo "=== After Changes ==="
-grep "Validation.*ms" $AFTER
+# 4. Compare
+diff -u $BASELINE $AFTER | grep -E "^[+-].*ms|Validation|Benchmark"
 ```
 
-### What to Compare
+### Key Metrics to Watch
 
-#### Key Metrics
+| Metric | Example |
+|--------|---------|
+| Parse throughput | `Parse Throughput : 127,730 rows/sec` |
+| Validation time | `SQL Validation    :         65 ms` |
+| Arrow off-heap peak | `Off-heap peak    :  25,640,960 bytes (24.5 MB)` |
+| Total pod impact | `Total Pod Impact : 1,119.9 MB` |
+| Memory leak | `0 bytes leaked` |
 
-1. **Validation Time** (primary metric)
-   ```
-   Validation        :        223 ms  (0.22 s)
-   ```
+---
 
-2. **Execution Mode**
-   ```
-   INFO ValidationPipeline - Executing 4 validator(s) in PARALLEL mode (virtual threads)
-   ```
+## Updating TEST_RESULTS.md
 
-3. **Memory Usage**
-   ```
-   Combined peak    :     361,763,392 bytes (345.0 MB)
-   ```
-
-4. **Parse Throughput**
-   ```
-   Parse Throughput : 189,897 rows/sec
-   Parse Throughput : 73.56 MB/sec
-   ```
-
-5. **Validation Results**
-   ```
-   ✓ All validations passed (4 validators, 223 ms)
-   ```
-
-### Example Analysis
-
-```
-Metric: Validation Time (Type A)
-Before: 154 ms
-After:  223 ms
-Diff:   +69 ms (+45%)
-
-Explanation:
-- Added 3 new validators (Message, Remittance, Transaction)
-- Each validator scans 1M transaction rows
-- Parallel execution reduces overhead
-- Trade-off: +69ms for comprehensive validation
-
-Verdict: Acceptable - 69ms is <2% of total 5.6s pipeline
-```
-
-## Updating Documentation
-
-After running comparison tests, update `TEST_RESULTS.md`:
-
-### Template for New Section
+After running benchmarks, add a new section to [TEST_RESULTS.md](TEST_RESULTS.md):
 
 ```markdown
 ## Test Run: YYYY-MM-DD
 
 ### Changes
-- Brief description of what changed
+- Brief description
 
 ### Results
 
-| File   | Previous | Current | Diff | Analysis |
-|--------|----------|---------|------|----------|
-| Type A | 223 ms   | 215 ms  | -8ms | Optimization X improved performance |
-| Type B | 172 ms   | 178 ms  | +6ms | Within noise margin |
-| Type C | 864 ms   | 850 ms  | -14ms| Benefit scales with data size |
+| File   | Parse ms | Val ms | Arrow MB | Heap ΔMB |
+|--------|----------|--------|----------|----------|
+| Type A | 9,236    | 60     | 224.4    | 12.6     |
+| ...    |          |        |          |          |
 
 ### Conclusions
-- Summary of findings
-- Any behavioral changes
-- Recommendations
+- Summary
 ```
-
-## Continuous Integration
-
-### CI/CD Integration (Future)
-
-For automated regression detection:
-
-```yaml
-# .github/workflows/validation-tests.yml
-name: Validation Performance Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-java@v2
-        with:
-          java-version: '21'
-      - name: Run validation tests
-        run: ./run_validation_tests.sh
-      - name: Archive test results
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-results
-          path: test-results/
-```
-
-## Best Practices
-
-### Do's
-
-✅ Run tests on same hardware for fair comparison  
-✅ Run multiple times if results vary (system load)  
-✅ Document environment (Java version, system specs)  
-✅ Explain performance changes in TEST_RESULTS.md  
-✅ Keep test logs for at least 2-3 major changes  
-
-### Don'ts
-
-❌ Don't compare tests from different machines  
-❌ Don't ignore small but consistent differences  
-❌ Don't make changes without establishing baseline  
-❌ Don't commit test logs to git (gitignored)  
-❌ Don't skip documenting performance regressions  
-
-## Troubleshooting
-
-### Tests Fail to Run
-
-```bash
-# Ensure Java 21 is installed
-java -version
-
-# Should show: openjdk version "21.x.x"
-# If not, install Java 21 or update JAVA_HOME in script
-```
-
-### Performance Varies Between Runs
-
-- System load affects results
-- Run 3 times, take median
-- Look for consistent patterns, not absolute numbers
-- Focus on relative changes (%, not ms)
-
-### Memory Errors
-
-```bash
-# If you see OutOfMemoryError, increase heap:
-MAVEN_OPTS="-Xmx4g" ./run_validation_tests.sh
-```
-
-## Reference
-
-- Baseline results: [TEST_RESULTS.md](TEST_RESULTS.md)
-- Architecture: [README.md#validation-framework](README.md#validation-framework)
-- Code: `src/main/java/com/iso20022/pain/validation/`
 
 ---
 
-**Last Updated:** 2026-02-15  
-**Maintainer:** Development Team
+## Troubleshooting
+
+**`error: invalid target release: 25`** — Use Java 25:
+```bash
+export JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64
+export PATH=$JAVA_HOME/bin:$PATH
+```
+
+**`OutOfMemoryError`** — Increase heap:
+```bash
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" mvn test -pl pgw-validator --also-make
+```
+
+**Tests skip large file types (A–C)** — They generate on first run. Types A–C take ~14–23 seconds to generate and ~8–22 seconds to parse.
+
+---
+
+**Last Updated:** 2026-04-05
+**Architecture:** Multi-module Maven (`pgw-ingestor` + `pgw-validator`)
+**Package root:** `com.pgw`

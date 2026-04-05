@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pgw</groupId>
+        <artifactId>pain001-arrow-loader</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>pgw-ingestor</artifactId>
+    <packaging>jar</packaging>
+
+    <name>PGW Ingestor — ISO 20022 pain.001 → Apache Arrow / DuckDB</name>
+    <description>
+        StAX streaming parser that reads ISO 20022 pain.001.001.09 XML files and loads them
+        into Apache Arrow columnar tables, persisting via local file or S3 IPC stream output,
+        with a DuckDB-backed repository for downstream SQL access.
+    </description>
+
+    <dependencies>
+        <!-- Apache Arrow off-heap allocator -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-unsafe</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow column vectors -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow C Data Interface — zero-copy Arrow→DuckDB registration -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
+        </dependency>
+
+        <!-- DuckDB JDBC driver for in-process SQL query engine -->
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+        </dependency>
+
+        <!-- Logging API -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+
+        <!-- AWS S3 client — optional, only needed for S3 persistence mode -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+    </dependencies>
+</project>

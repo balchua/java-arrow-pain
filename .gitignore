@@ -3,12 +3,18 @@ target/
 # Large generated sample data (regenerate with SampleGeneratorRunner or mvn test)
 src/main/resources/sample-data/pain001_type_*.xml
 src/test/resources/sample-data/pain001_type_*.xml
+pgw-ingestor/src/main/resources/sample-data/pain001_type_*.xml
+pgw-validator/src/test/resources/sample-data/pain001_type_*.xml
 
 # Arrow IPC output files
 src/main/resources/output/*.arrow
 src/main/resources/output/*.arrows
 src/test/resources/output/*.arrow
 src/test/resources/output/*.arrows
+pgw-ingestor/src/main/resources/output/*.arrow
+pgw-ingestor/src/main/resources/output/*.arrows
+pgw-validator/src/test/resources/output/*.arrow
+pgw-validator/src/test/resources/output/*.arrows
 
 # Test results (logs only, keep TEST_RESULTS.md)
 test-results/*.log

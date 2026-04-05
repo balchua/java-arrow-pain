@@ -115,6 +115,7 @@ pgw-validator/src/test/java/com/pgw/
 ├── SampleGenerationTest.java         # JUnit 5: Type D (valid) + Type E (invalid CtrlSum)
 ├── StreamingPipelineTest.java        # JUnit 5: streaming memory, row counts, .arrows files
 ├── ArrowFileLoadBenchmarkTest.java   # JUnit 5: Arrow IPC Stream → DuckDB load speed benchmark
+├── ValidationBenchmarkTest.java      # JUnit 5: Arrow→DuckDB registration + SQL validation metrics
 ├── MemoryLeakVerificationTest.java   # JUnit 5: 50-iteration leak verification
 ├── FullPipelineBenchmarkTest.java    # JUnit 5: Full streaming pipeline A–E benchmark
 ├── SampleGeneratorRunner.java        # Runnable main: generate by type (a–e)
@@ -124,6 +125,12 @@ pgw-validator/src/test/java/com/pgw/
     ├── TestPainFileSpecs.java        # Test-only spec constants A–E
     └── TestFileGenerator.java        # generate-if-absent + file-complete check
 ```
+
+| Test class | What it measures |
+|------------|-----------------|
+| `ArrowFileLoadBenchmarkTest` | Arrow IPC Stream → DuckDB load time only (no validation) |
+| `ValidationBenchmarkTest` | Arrow IPC Stream → DuckDB load time **+ SQL validation time** |
+| `FullPipelineBenchmarkTest` | End-to-end: XML parse → live DuckDB INSERT (pipelined) → Arrow write → SQL validate |
 
 ---
 
@@ -201,22 +208,42 @@ Arrow type mappings follow ISO 20022 data type definitions:
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn clean package -DskipTests
 
-# Run the application (from pgw-validator module — it owns the App entry point)
+# ── Run the application (no benchmark) ────────────────────────────────────────
+
+# Local persistence (writes .arrows files to src/main/resources/output/)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
 
-# S3 mode
+# Custom output directory
+PAIN_LOCAL_OUTPUT_DIR=/data/arrows \
+  MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
+
+# S3 persistence mode
 PAIN_PERSISTENCE_MODE=s3 PAIN_S3_BUCKET=my-bucket PAIN_S3_KEY_PREFIX=pain001/2026/02 \
   MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
   mvn exec:java -pl pgw-validator -Dexec.args="path/to/pain001.xml"
 
-# Run full test suite (generates sample files, runs all benchmarks)
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
-  mvn test -pl pgw-validator --also-make
+# ── Run tests (without the large benchmarks) ──────────────────────────────────
 
-# Run a specific test class
+# Fast tests only — no large file generation (Types D + E, ~200 rows each, < 5 s)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-  mvn test -pl pgw-validator --also-make -Dtest=ArrowFileLoadBenchmarkTest
+  mvn test -pl pgw-ingestor,pgw-validator \
+  -Dtest="SampleGenerationTest,StreamingPipelineTest"
+
+# Validation-stage benchmark only (Arrow IPC → DuckDB load + SQL validation)
+# Generates Types A–E Arrow files if absent; runs quickly once files exist
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn test -pl pgw-ingestor,pgw-validator -Dtest=ValidationBenchmarkTest
+
+# Arrow IPC → DuckDB load benchmark only (no validation)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn test -pl pgw-ingestor,pgw-validator -Dtest=ArrowFileLoadBenchmarkTest
+
+# ── Run the full test suite (all benchmarks) ──────────────────────────────────
+
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
+  mvn test -pl pgw-ingestor,pgw-validator
 
 # Standardized before/after comparison script
 ./run_validation_tests.sh

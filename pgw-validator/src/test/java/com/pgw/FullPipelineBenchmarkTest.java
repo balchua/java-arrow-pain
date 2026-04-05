@@ -48,12 +48,22 @@ class FullPipelineBenchmarkTest {
     private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
 
     // Summarises one type for the consolidated table
+    /**
+     * Per-type summary for the consolidated table.
+     *
+     * <p>Note: DuckDB live-INSERT is <em>pipelined</em> with parsing inside
+     * {@link com.pgw.parser.StreamingBatchConsumer} — each Arrow batch is written
+     * to DuckDB immediately as it is produced by the StAX parser, so there is no
+     * separate "DuckDB load" phase in this full-pipeline run.
+     * To see Arrow-file → DuckDB registration time in isolation see
+     * {@link ArrowFileLoadBenchmarkTest}, and for DuckDB load + SQL validation
+     * metrics together see {@link ValidationBenchmarkTest}.</p>
+     */
     record TypeSummary(
             String typeLabel,
             long xmlSizeBytes,
             long arrowSizeBytes,
             long parseMs,
-            long duckdbMs,
             long validateMs,
             long writeMs,
             long offHeapAllocatedBytes,
@@ -111,7 +121,6 @@ class FullPipelineBenchmarkTest {
         benchmark.setHeapMaxBytes(Runtime.getRuntime().maxMemory());
 
         long parseMs;
-        long duckdbMs = 0;
         long validateMs;
         long writeMs;
         long offHeapAllocated;
@@ -198,7 +207,7 @@ class FullPipelineBenchmarkTest {
                 spec.name().replaceAll("\\s*\\(.*", "").trim(),
                 fileSizeBytes,
                 arrowBytes,
-                parseMs, duckdbMs, validateMs, writeMs,
+                parseMs, validateMs, writeMs,
                 offHeapAllocated, offHeapPeak, offHeapStreamingPeak,
                 heapDelta, txRows, validationPassed
         );
@@ -239,6 +248,7 @@ class FullPipelineBenchmarkTest {
         System.out.println("  Stream MB  = Peak Arrow off-heap sampled at each batch flush during parseStreaming()");
         System.out.println("  Savings %  = (1 - Stream MB / Arr MB) × 100  [vs batch-accumulation proxy: Arrow IPC file size]");
         System.out.println("  Write ms   = Time to flush/close IPC writers (actual write I/O is pipelined with parse)");
+        System.out.println("  NOTE: DuckDB live-INSERT is pipelined with parse; for Arrow→DuckDB + validation latency see ValidationBenchmarkTest");
         System.out.println();
     }
 }

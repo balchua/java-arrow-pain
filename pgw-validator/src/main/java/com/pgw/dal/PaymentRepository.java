@@ -69,6 +69,21 @@ public interface PaymentRepository extends AutoCloseable {
      */
     void streamTransactions(String remittanceId, Consumer<Transaction> handler) throws SQLException;
 
+    /**
+     * Streams every {@link Transaction} row in the transactions table,
+     * invoking {@code handler} once per row regardless of remittance.
+     *
+     * <p>Rows are fetched from DuckDB one at a time; the heap holds at most one
+     * {@code Transaction} instance during iteration. This is intended for
+     * use-cases that must inspect every transaction individually (e.g., calling
+     * an external API per record) and want to measure the raw cost of full-table
+     * streaming through DuckDB.</p>
+     *
+     * @param handler callback invoked for each transaction row
+     * @throws SQLException if the underlying query fails
+     */
+    void streamAllTransactions(Consumer<Transaction> handler) throws SQLException;
+
     @Override
     void close() throws Exception;
 }

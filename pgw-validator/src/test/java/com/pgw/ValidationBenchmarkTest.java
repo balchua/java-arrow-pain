@@ -9,6 +9,7 @@ import com.pgw.parser.PainParser;
 import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
 import com.pgw.validation.ValidationContext;
+import com.pgw.validation.validators.StreamingTransactionIteratorValidator;
 import com.pgw.validation.ValidationPipeline;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -62,6 +63,7 @@ class ValidationBenchmarkTest {
             long transactionRows,
             long duckdbLoadMs,
             long sqlValidationMs,
+            long streamingIterationMs,
             long peakOffHeapBytes,
             boolean passed,
             int errorCount
@@ -123,6 +125,7 @@ class ValidationBenchmarkTest {
         long transactionRows;
         long duckdbLoadMs;
         long sqlValidationMs;
+        long streamingIterationMs;
         long peakOffHeap;
         boolean passed;
         int errorCount;
@@ -152,6 +155,12 @@ class ValidationBenchmarkTest {
 
                 passed     = !ctx.hasErrors();
                 errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+
+                // Step 5: Time streaming row-by-row iteration (simulates per-record external checks)
+                long streamingStart = System.nanoTime();
+                ValidationContext streamingCtx = new ValidationContext();
+                new StreamingTransactionIteratorValidator().validate(repository, streamingCtx);
+                streamingIterationMs = (System.nanoTime() - streamingStart) / 1_000_000L;
             }
         }
 
@@ -159,7 +168,7 @@ class ValidationBenchmarkTest {
                 spec.name().replaceAll("\\s*\\(.*", "").trim(),
                 totalArrowBytes,
                 remittanceRows, transactionRows,
-                duckdbLoadMs, sqlValidationMs, peakOffHeap,
+                duckdbLoadMs, sqlValidationMs, streamingIterationMs, peakOffHeap,
                 passed, errorCount);
     }
 
@@ -244,6 +253,43 @@ class ValidationBenchmarkTest {
         System.out.println("  Validate ms    = time to run ValidationPipeline.standard() against the populated DuckDB tables");
         System.out.println("  Peak Off-Heap  = Arrow allocator off-heap bytes after loading all 3 tables into DuckDB");
         System.out.println("  rows/ms (val)  = transaction row scan throughput during validation");
+        System.out.println();
+
+        // ── Streaming Iteration Report ───────────────────────────────────────────
+        final String STREAM_SEP =
+            "╠══════════╦═══════════╦════════════════╦══════════════╣";
+        System.out.println("╔══════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║   Streaming Iteration Benchmark — StreamingTransactionIteratorValidator ║");
+        System.out.println(STREAM_SEP.replace('╠', '╠').replace('╣', '╣'));
+        System.out.println("║  Type    ║  Tx Rows  ║ Streaming ms   ║ rows/ms (str)║");
+        System.out.println(STREAM_SEP.replace('╦', '╬'));
+        long totalStreamMs  = 0;
+        long totalStreamRows = 0;
+        for (ValidationResult r : results) {
+            double streamRowsPerMs = r.streamingIterationMs() > 0
+                    ? (double) r.transactionRows() / r.streamingIterationMs()
+                    : (double) r.transactionRows();
+            System.out.printf("║  %-8s ║ %9s ║ %14s ║ %12s ║%n",
+                    r.label(),
+                    String.format("%,d", r.transactionRows()),
+                    String.format("%,d", r.streamingIterationMs()),
+                    String.format("%,.0f", streamRowsPerMs));
+            totalStreamMs   += r.streamingIterationMs();
+            totalStreamRows += r.transactionRows();
+        }
+        System.out.println("╠══════════╬═══════════╬════════════════╬══════════════╣");
+        double totalStreamRowsPerMs = totalStreamMs > 0
+                ? (double) totalStreamRows / totalStreamMs : (double) totalStreamRows;
+        System.out.printf("║  %-8s ║ %9s ║ %14s ║ %12s ║%n",
+                "TOTAL",
+                String.format("%,d", totalStreamRows),
+                String.format("%,d", totalStreamMs),
+                String.format("%,.0f", totalStreamRowsPerMs));
+        System.out.println("╚══════════╩═══════════╩════════════════╩══════════════╝");
+        System.out.println();
+        System.out.println("  Streaming ms   = time for StreamingTransactionIteratorValidator to iterate all rows and");
+        System.out.println("                   map each into a Transaction POJO, checking instructedAmount > 0");
+        System.out.println("  rows/ms (str)  = transaction row streaming throughput (query + result fetch + object mapping + check)");
         System.out.println();
     }
 }

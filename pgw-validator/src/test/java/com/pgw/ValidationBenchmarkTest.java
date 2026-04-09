@@ -260,7 +260,7 @@ class ValidationBenchmarkTest {
             "╠══════════╦═══════════╦════════════════╦══════════════╣";
         System.out.println("╔══════════════════════════════════════════════════════════════════════╗");
         System.out.println("║   Streaming Iteration Benchmark — StreamingTransactionIteratorValidator ║");
-        System.out.println(STREAM_SEP.replace('╠', '╠').replace('╣', '╣'));
+        System.out.println(STREAM_SEP);
         System.out.println("║  Type    ║  Tx Rows  ║ Streaming ms   ║ rows/ms (str)║");
         System.out.println(STREAM_SEP.replace('╦', '╬'));
         long totalStreamMs  = 0;

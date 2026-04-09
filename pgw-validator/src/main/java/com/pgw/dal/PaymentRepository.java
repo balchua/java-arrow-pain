@@ -73,8 +73,9 @@ public interface PaymentRepository extends AutoCloseable {
      * Streams every {@link Transaction} row in the transactions table,
      * invoking {@code handler} once per row regardless of remittance.
      *
-     * <p>Rows are fetched from DuckDB one at a time; the heap holds at most one
-     * {@code Transaction} instance during iteration. This is intended for
+     * <p>Rows are fetched from DuckDB in batches (fetch size 1,000); the handler
+     * is still invoked once per row so the heap holds at most one
+     * {@code Transaction} instance per callback invocation. This is intended for
      * use-cases that must inspect every transaction individually (e.g., calling
      * an external API per record) and want to measure the raw cost of full-table
      * streaming through DuckDB.</p>

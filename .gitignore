@@ -5,6 +5,7 @@ src/main/resources/sample-data/pain001_type_*.xml
 src/test/resources/sample-data/pain001_type_*.xml
 pgw-ingestor/src/main/resources/sample-data/pain001_type_*.xml
 pgw-ingestor/src/test/resources/sample-data/pain001_type_*.xml
+pgw-ingestor-pure-arrow/src/test/resources/sample-data/pain001_type_*.xml
 pgw-validator/src/test/resources/sample-data/pain001_type_*.xml
 
 # Arrow IPC output files

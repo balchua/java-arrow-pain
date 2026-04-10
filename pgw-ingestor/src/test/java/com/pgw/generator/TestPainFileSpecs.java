@@ -42,4 +42,14 @@ public final class TestPainFileSpecs {
     public static final PainFileSpec TYPE_G = new PainFileSpec(
             "Type G (1 PmtInf × 4,000,000 TxInf)",
             "pain001_type_g_1x4M.xml", 1, 4_000_000);
+
+    /** Type H: 10 PmtInf × 200 CdtTrfTxInf — 10 remittances, 200 transactions each (2000 total). */
+    public static final PainFileSpec TYPE_H = new PainFileSpec(
+            "Type H (10 PmtInf × 200 TxInf)",
+            "pain001_type_h_10x200.xml", 10, 200);
+
+    /** Type J: 5 PmtInf × 400 CdtTrfTxInf — 5 remittances, 2000 transactions total. */
+    public static final PainFileSpec TYPE_J = new PainFileSpec(
+            "Type J (5 PmtInf × 400 TxInf)",
+            "pain001_type_j_5x400.xml", 5, 400);
 }

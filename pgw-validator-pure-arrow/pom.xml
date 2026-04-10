@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pgw</groupId>
+        <artifactId>pain001-arrow-loader</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>pgw-validator-pure-arrow</artifactId>
+    <packaging>jar</packaging>
+
+    <name>PGW Pure-Arrow Validator — ISO 20022 pain.001 Validation without DuckDB</name>
+    <description>
+        Validation layer backed by a pure Apache Arrow repository (no DuckDB).
+        Implements the same PaymentRepository contract as pgw-validator but reads
+        data directly from Arrow IPC stream files via ArrowStreamReader.
+        The repository is modular: ArrowMessageTable, ArrowRemittanceTable, and
+        ArrowTransactionTable each encapsulate schema-specific column access and
+        are composed into ArrowPaymentRepositoryImpl.
+    </description>
+
+    <dependencies>
+        <!-- Validation pipeline, PaymentRepository interface, validators, domain models -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-validator</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Shared Arrow infrastructure (Pain001ArrowSchema field constants) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow off-heap allocator -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-unsafe</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow column vectors + IPC reader/writer -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+
+        <!-- JUnit 5 — test scope only -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Pure-Arrow ingestor — test-scoped: generates Arrow IPC files from XML without DuckDB -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor-pure-arrow</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- pgw-common test-jar — provides TestFileGenerator, TestPainFileSpecs -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- pgw-ingestor test-jar — provides TestFileGenerator, TestPainFileSpecs -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- DuckDB + Arrow C Data — test-scoped for ValidatorComparisonBenchmarkTest -->
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g</argLine>
+                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

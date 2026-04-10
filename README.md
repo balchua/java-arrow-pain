@@ -187,12 +187,12 @@ pgw-validator/src/main/java/com/pgw/
 | `ParsePipelineTest` | `pgw-ingestor` | StAX parser correctness |
 | `StreamingPipelineTest` | `pgw-ingestor` | Streaming memory footprint, DuckDB row counts, ArrowIpc export/load |
 | `MemoryLeakVerificationTest` | `pgw-ingestor` | 50-iteration streaming parse: 0 bytes leaked |
-| `IngestionBenchmarkTest` | `pgw-ingestor` | XML → DuckDB → Arrow IPC benchmark (Types A–G) |
+| `IngestionBenchmarkTest` | `pgw-ingestor` | XML → DuckDB → Arrow IPC benchmark (Types A–J) |
 | `PureArrowParsePipelineTest` | `pgw-ingestor-pure-arrow` | Pure-Arrow parser correctness (Types D + E) |
 | `PureArrowStreamingPipelineTest` | `pgw-ingestor-pure-arrow` | Memory footprint, row counts, IPC round-trip |
 | `PureArrowMemoryLeakVerificationTest` | `pgw-ingestor-pure-arrow` | 50-iteration zero-leak test (Types D + E) |
-| `PureArrowIngestionBenchmarkTest` | `pgw-ingestor-pure-arrow` | XML → Arrow IPC benchmark, no DuckDB (Types A–G) |
-| **`PipelineComparisonBenchmarkTest`** | `pgw-ingestor-pure-arrow` | **DuckDB vs Pure Arrow side-by-side comparison (Types A–G)** |
+| `PureArrowIngestionBenchmarkTest` | `pgw-ingestor-pure-arrow` | XML → Arrow IPC benchmark, no DuckDB (Types A–J) |
+| **`PipelineComparisonBenchmarkTest`** | `pgw-ingestor-pure-arrow` | **DuckDB vs Pure Arrow side-by-side comparison (Types A–J)** |
 | `ValidationTest` | `pgw-validator` | Domain validation correctness |
 | `ArrowFileLoadBenchmarkTest` | `pgw-validator` | Arrow file → DuckDB load time (no validation) |
 | `ValidationBenchmarkTest` | `pgw-validator` | Arrow→DuckDB load time **+ SQL validation time** |
@@ -277,7 +277,7 @@ INSERT round-trip and Arrow→DuckDB→Arrow overhead, making ingest significant
 scenarios where downstream DuckDB access is not needed at ingest time.
 
 See [TEST_RESULTS.md](TEST_RESULTS.md#duckdb-vs-pure-arrow-pipeline-comparison) for a
-side-by-side performance comparison of both pipelines across Types A–G.
+side-by-side performance comparison of both pipelines across Types A–J.
 
 
 ### Arrow Export/Load — Extension-less C Data Interface
@@ -358,7 +358,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor-pure-arrow \
   -Dtest="PureArrowParsePipelineTest,PureArrowStreamingPipelineTest"
 
-# Pipeline comparison benchmark (DuckDB vs Pure Arrow, Types A–G)
+# Pipeline comparison benchmark (DuckDB vs Pure Arrow, Types A–J)
 # First run generates large files ~10 min; subsequent runs use cached files
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor-pure-arrow -Dtest=PipelineComparisonBenchmarkTest
@@ -431,9 +431,12 @@ When tests run, benchmark output is printed directly to the console (not redirec
 | E | `pain001_type_e_2x100_invalid_ctrlsum.xml` | Small invalid | 2 | 100 | 200 | Negative test |
 | F | `pain001_type_f_1x2M.xml` | Very fat batch | 1 | 2,000,000 | 2,000,000 | Large-scale benchmark |
 | G | `pain001_type_g_1x4M.xml` | Extreme batch | 1 | 4,000,000 | 4,000,000 | Extreme-scale benchmark |
+| H | `pain001_type_h_10x200.xml` | Multi-remittance | 10 | 200 | 2,000 | Multi-remittance correctness |
+| I | `pain001_type_i_5x400.xml` | Multi-remittance | 5 | 400 | 2,000 | Multi-remittance variant |
+| J | `pain001_type_j_1x1.xml` | Unitary | 1 | 1 | 1 | Unitary baseline |
 
 > Types A–C, F, G are large files (~516 MB – 2.9 GB) not committed to the repo; generated on first test run.
-> Types D–E are small (<110 KB) and generated automatically by `mvn test`.
+> Types D–E, H–J are small (< 2 MB) and generated automatically by `mvn test`.
 
 ---
 
@@ -502,8 +505,8 @@ Producer App                          Consumer App A
 ## Performance Results
 
 See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
-- **DuckDB pipeline benchmarks** — all 7 types A–G (parse+insert ms, export ms, peak off-heap)
-- **Pure-Arrow pipeline benchmarks** — all 7 types A–G (parse ms, peak off-heap)
+- **DuckDB pipeline benchmarks** — all 10 types A–J (parse+insert ms, export ms, peak off-heap)
+- **Pure-Arrow pipeline benchmarks** — all 10 types A–J (parse ms, peak off-heap)
 - **Side-by-side comparison** — DuckDB total vs Pure-Arrow, with speedup ratio per type
 - Arrow IPC Stream → DuckDB downstream load times (via `ArrowIpc.load()` — no extension)
 - Validation stage benchmark: DuckDB load ms + SQL validation ms separated

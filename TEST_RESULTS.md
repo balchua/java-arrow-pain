@@ -51,7 +51,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 | `ParsePipelineTest` | StAX parser correctness: row counts, field values, edge cases | 4 |
 | `StreamingPipelineTest` | Memory footprint; DuckDB row counts; `ArrowIpc.export` + `ArrowIpc.load` round-trip | 4 |
 | `MemoryLeakVerificationTest` | 50-iteration streaming parse stress test — zero bytes leaked | 3 |
-| `IngestionBenchmarkTest` | XML → DuckDB INSERT → Arrow export benchmark for Types A–G | 1 |
+| `IngestionBenchmarkTest` | XML → DuckDB INSERT → Arrow export benchmark for Types A–J | 1 |
 | **Total** | | **12** |
 
 ## `pgw-ingestor` Test Results
@@ -67,23 +67,26 @@ pgw-ingestor  :  12 tests — BUILD SUCCESS
 
 ## `pgw-ingestor` — XML → DuckDB INSERT → Arrow Export Benchmark (`IngestionBenchmarkTest`)
 
-Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
+Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
-╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
-║       Ingestion Benchmark — XML → StAX Parse → DuckDB INSERT → ArrowIpc.export()                                   ║
-╠══════════╦══════════╦══════════════╦════════════╦════════════════╦════════════╦═══════════╣
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║       Ingestion Benchmark — XML → StAX Parse → DuckDB INSERT → ArrowIpc.export()                       ║
+╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
 ║  Type    ║ XML (MB) ║ Parse+Ins ms ║ Export ms  ║ Peak Off-Heap  ║ Arrow (MB) ║  Tx Rows  ║
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
-║  Type A  ║   734.4  ║      16,845  ║       650  ║   31,309,824   ║    294.64 ║ 1,000,000 ║
-║  Type B  ║   734.3  ║      14,915  ║       605  ║   31,309,824   ║    294.54 ║ 1,000,000 ║
-║  Type C  ║ 1,295.1  ║      32,612  ║     1,012  ║   52,101,120   ║    494.90 ║ 1,000,000 ║
-║  Type D  ║     0.1  ║          13  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
-║  Type E  ║     0.1  ║          14  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
-║  Type F  ║ 1,469.8  ║      32,083  ║     1,173  ║   31,309,824   ║    590.34 ║ 2,000,000 ║
-║  Type G  ║ 2,940.7  ║      65,432  ║     2,486  ║   31,309,824   ║  1,181.73 ║ 4,000,000 ║
+║  Type A  ║   734.4  ║      15,758  ║       987  ║   31,309,824   ║    294.64 ║ 1,000,000 ║
+║  Type B  ║   734.3  ║      14,317  ║       788  ║   31,309,824   ║    294.54 ║ 1,000,000 ║
+║  Type C  ║ 1,295.1  ║      31,058  ║     1,110  ║   52,101,120   ║    494.90 ║ 1,000,000 ║
+║  Type D  ║     0.1  ║          16  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type E  ║     0.1  ║          12  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type F  ║ 1,469.8  ║      29,716  ║     1,799  ║   31,309,824   ║    590.34 ║ 2,000,000 ║
+║  Type G  ║ 2,940.7  ║      61,294  ║     4,498  ║   31,309,824   ║  1,181.73 ║ 4,000,000 ║
+║  Type H  ║     1.5  ║          30  ║         7  ║    2,080,768   ║      0.59 ║     2,000 ║
+║  Type I  ║     1.5  ║          29  ║         6  ║    2,080,768   ║      0.59 ║     2,000 ║
+║  Type J  ║     0.0  ║           9  ║         4  ║    1,785,856   ║      0.01 ║         1 ║
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
-║  TOTAL   ║ 7,174.6  ║     161,914  ║     5,936  ║   52,101,120   ║  2,856.27 ║ 9,000,400 ║
+║  TOTAL   ║ 7,177.5  ║     152,239  ║     9,209  ║   52,101,120   ║  2,857.46 ║ 9,004,401 ║
 ╚══════════╩══════════╩══════════════╩════════════╩════════════════╩════════════╩═══════════╝
 
   XML (MB)       = source XML file size on disk
@@ -96,12 +99,15 @@ Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
 ```
 
 **Key findings — DuckDB pipeline:**
-- **Peak off-heap stays bounded at ~31 MB** for all single-remittance types (A, B, D, E, F, G)
+- **Peak off-heap stays bounded at ~31 MB** for all single-remittance types (A, B, D, E, F, G, H, I, J)
   because `StreamingBatchConsumer` feeds each 65k-row batch to DuckDB via `registerArrowStream` and
   immediately releases the Arrow buffer — only 1 batch lives in Arrow memory at any time
 - Type C peaks at ~52 MB because 1M separate remittance batches are processed (one batch per PmtInf)
-- Type G (4M rows) scales linearly with Type F: 65,432 ms vs 32,083 ms
-- DuckDB export is fast (< 2.5 s even for 4M rows) since it reads from DuckDB, not XML
+- Type G (4M rows) scales linearly with Type F: 61,294 ms vs 29,716 ms
+- DuckDB export is fast (< 4.5 s even for 4M rows) since it reads from DuckDB, not XML
+- **Type H** (10 × 200 = 2,000 tx): 30 ms parse, 7 ms export — multi-remittance correctness baseline
+- **Type I** (5 × 400 = 2,000 tx): 29 ms parse, 6 ms export — same total rows as H, different grouping
+- **Type J** (1 × 1 = 1 tx): 9 ms parse, 4 ms export — **unitary baseline**, minimal XML payload
 
 ## `pgw-ingestor` — Memory Leak Verification (`MemoryLeakVerificationTest`)
 
@@ -142,8 +148,8 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 | `PureArrowParsePipelineTest` | Parse correctness: row counts, IPC file creation, ArrowStreamReader round-trip | 5 |
 | `PureArrowStreamingPipelineTest` | Memory footprint, row counts, multi-ingest allocator sharing | 3 |
 | `PureArrowMemoryLeakVerificationTest` | 50-iteration zero-leak test for Types D + E | 2 |
-| `PureArrowIngestionBenchmarkTest` | XML → Arrow IPC benchmark for Types A–G (no DuckDB) | 1 |
-| `PipelineComparisonBenchmarkTest` | DuckDB pipeline vs Pure-Arrow pipeline side-by-side (Types A–G) | 1 |
+| `PureArrowIngestionBenchmarkTest` | XML → Arrow IPC benchmark for Types A–J (no DuckDB) | 1 |
+| `PipelineComparisonBenchmarkTest` | DuckDB pipeline vs Pure-Arrow pipeline side-by-side (Types A–J) | 1 |
 | **Total** | | **12** |
 
 ## `pgw-ingestor-pure-arrow` Test Results
@@ -162,7 +168,7 @@ pgw-ingestor-pure-arrow  :  12 tests — BUILD SUCCESS
 
 **Path:** XML → StAX streaming parse → `PureArrowBatchConsumer` → `ArrowStreamWriter` → `.arrow` files
 
-Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
+Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
 ╔════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -170,13 +176,16 @@ Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
 ╠══════════╦═══════════╦══════════════╦════════════════╦═══════════╦═════════╦══════════╣
 ║  Type    ║  XML (MB) ║  Parse (ms)  ║ Peak Off-Heap  ║  Tx Rows  ║ MB/sec  ║Arrow(MB) ║
 ╠══════════╬═══════════╬══════════════╬════════════════╬═══════════╬═════════╬══════════╣
-║  Type A  ║    734.4  ║      12,932  ║      463.0 MB  ║ 1,000,000 ║    56.8 ║   294.6  ║
-║  Type B  ║    734.3  ║      11,399  ║      463.0 MB  ║ 1,000,000 ║    64.4 ║   294.5  ║
-║  Type C  ║  1,295.1  ║      19,550  ║      791.3 MB  ║ 1,000,000 ║    66.2 ║   494.9  ║
-║  Type D  ║      0.1  ║           5  ║        1.7 MB  ║       200 ║    29.5 ║     0.1  ║
-║  Type E  ║      0.1  ║           5  ║        1.7 MB  ║       200 ║    29.5 ║     0.1  ║
-║  Type F  ║  1,469.8  ║      21,534  ║      896.1 MB  ║ 2,000,000 ║    68.3 ║   590.3  ║
-║  Type G  ║  2,940.7  ║      43,637  ║    1,791.2 MB  ║ 4,000,000 ║    67.4 ║ 1,181.7  ║
+║  Type A  ║    734.4  ║      12,289  ║      463.0 MB  ║ 1,000,000 ║    59.8 ║   294.6  ║
+║  Type B  ║    734.3  ║      11,115  ║      463.0 MB  ║ 1,000,000 ║    66.1 ║   294.5  ║
+║  Type C  ║  1,295.1  ║      16,390  ║      791.3 MB  ║ 1,000,000 ║    79.0 ║   494.9  ║
+║  Type D  ║      0.1  ║           6  ║        1.7 MB  ║       200 ║    24.6 ║     0.1  ║
+║  Type E  ║      0.1  ║           6  ║        1.7 MB  ║       200 ║    24.6 ║     0.1  ║
+║  Type F  ║  1,469.8  ║      17,586  ║      896.1 MB  ║ 2,000,000 ║    83.6 ║   590.3  ║
+║  Type G  ║  2,940.7  ║      35,273  ║    1,791.2 MB  ║ 4,000,000 ║    83.4 ║ 1,181.7  ║
+║  Type H  ║      1.5  ║          19  ║        2.0 MB  ║     2,000 ║    77.3 ║     0.6  ║
+║  Type I  ║      1.5  ║          20  ║        2.0 MB  ║     2,000 ║    73.3 ║     0.6  ║
+║  Type J  ║      0.0  ║           2  ║        1.7 MB  ║         1 ║     0.8 ║     0.0  ║
 ╚══════════╩═══════════╩══════════════╩════════════════╩═══════════╩═════════╩══════════╝
 
   XML (MB)        = source XML file size on disk
@@ -195,6 +204,9 @@ Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
   - Type G (4M tx): **1,791 MB** (~1.75 GB — 4× allocator limit required)
 - This is fundamentally different from the DuckDB path which stays at ~31 MB regardless of file size
 - Parse speed is faster than DuckDB (see comparison below) because there is no SQL INSERT overhead
+- **Type H** (10 × 200): 19 ms, 2.0 MB peak — multiple remittances, still tiny
+- **Type I** (5 × 400): 20 ms, 2.0 MB peak — same total rows, different grouping
+- **Type J** (1 × 1): 2 ms, 1.7 MB peak — **unitary baseline** (minimum viable payload)
 
 ## `pgw-ingestor-pure-arrow` — Memory Leak Verification
 
@@ -214,22 +226,25 @@ This benchmark runs both pipelines back-to-back for each type and prints a side-
 **DuckDB pipeline total** = Parse+Insert ms + Export ms
 **Pure-Arrow pipeline total** = Parse+Write ms (single step, no SQL engine)
 
-Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
+Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
-╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
-║          PIPELINE COMPARISON — DuckDB  vs  Pure Arrow  (XML → .arrow files)                                             ║
-╠══════════╦══════════╦══════════════╦═══════════╦═══════════════╦══════════════╦═══════════════╦═══════════╦════════════╣
-║  Type    ║ XML (MB) ║ DuckDB Prs+I ║ DuckDB Ex ║ DuckDB Peak   ║ PureArrow ms ║ PureArrow Pk  ║  Tx Rows  ║ Speedup(×) ║
-╠══════════╬══════════╬══════════════╬═══════════╬═══════════════╬══════════════╬═══════════════╬═══════════╬════════════╣
-║  Type A  ║   734.4  ║       16,582 ║       684 ║      29.9 MB  ║      12,252  ║     463.0 MB  ║ 1,000,000 ║     1.41×  ║
-║  Type B  ║   734.3  ║       12,021 ║       631 ║      29.9 MB  ║       8,585  ║     463.0 MB  ║ 1,000,000 ║     1.47×  ║
-║  Type C  ║ 1,295.1  ║       31,803 ║     1,022 ║      49.7 MB  ║      16,336  ║     791.3 MB  ║ 1,000,000 ║     2.01×  ║
-║  Type D  ║     0.1  ║           10 ║         5 ║       1.7 MB  ║           4  ║       1.7 MB  ║       200 ║     3.75×  ║
-║  Type E  ║     0.1  ║            9 ║         5 ║       1.7 MB  ║           4  ║       1.7 MB  ║       200 ║     3.50×  ║
-║  Type F  ║ 1,469.8  ║       27,652 ║     1,185 ║      29.9 MB  ║      17,710  ║     896.1 MB  ║ 2,000,000 ║     1.63×  ║
-║  Type G  ║ 2,940.7  ║       58,027 ║     2,504 ║      29.9 MB  ║      36,047  ║   1,791.2 MB  ║ 4,000,000 ║     1.68×  ║
-╚══════════╩══════════╩══════════════╩═══════════╩═══════════════╩══════════════╩═══════════════╩═══════════╩════════════╝
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║          PIPELINE COMPARISON — DuckDB  vs  Pure Arrow  (XML → .arrow files)                                                   ║
+╠══════════╦══════════╦══════════════╦═══════════╦═══════════════╦══════════════╦═══════════════╦═══════════╦══════════════════╣
+║  Type    ║ XML (MB) ║ DuckDB Prs+I ║ DuckDB Ex ║ DuckDB Peak   ║ PureArrow ms ║ PureArrow Pk  ║  Tx Rows  ║   Speedup (×)    ║
+╠══════════╬══════════╬══════════════╬═══════════╬═══════════════╬══════════════╬═══════════════╬═══════════╬══════════════════╣
+║  Type A  ║   734.4  ║       15,758 ║       987 ║      29.9 MB  ║      12,289  ║     463.0 MB  ║ 1,000,000 ║        1.35×     ║
+║  Type B  ║   734.3  ║       14,317 ║       788 ║      29.9 MB  ║      11,115  ║     463.0 MB  ║ 1,000,000 ║        1.36×     ║
+║  Type C  ║ 1,295.1  ║       31,058 ║     1,110 ║      49.7 MB  ║      16,390  ║     791.3 MB  ║ 1,000,000 ║        1.96×     ║
+║  Type D  ║     0.1  ║           16 ║         5 ║       1.7 MB  ║           6  ║       1.7 MB  ║       200 ║        3.50×     ║
+║  Type E  ║     0.1  ║           12 ║         5 ║       1.7 MB  ║           6  ║       1.7 MB  ║       200 ║        2.83×     ║
+║  Type F  ║ 1,469.8  ║       29,716 ║     1,799 ║      29.9 MB  ║      17,586  ║     896.1 MB  ║ 2,000,000 ║        1.79×     ║
+║  Type G  ║ 2,940.7  ║       61,294 ║     4,498 ║      29.9 MB  ║      35,273  ║   1,791.2 MB  ║ 4,000,000 ║        1.86×     ║
+║  Type H  ║     1.5  ║           30 ║         7 ║       2.0 MB  ║          19  ║       2.0 MB  ║     2,000 ║        1.95×     ║
+║  Type I  ║     1.5  ║           29 ║         6 ║       2.0 MB  ║          20  ║       2.0 MB  ║     2,000 ║        1.75×     ║
+║  Type J  ║     0.0  ║            9 ║         4 ║       1.7 MB  ║           2  ║       1.7 MB  ║         1 ║        6.50×     ║
+╚══════════╩══════════╩══════════════╩═══════════╩═══════════════╩══════════════╩═══════════════╩═══════════╩══════════════════╝
 
   DuckDB Prs+I   = StAX streaming parse + StreamingBatchConsumer INSERT into DuckDB (ms)
   DuckDB Ex      = ArrowIpc.export() for all 3 tables via C Data Interface (ms)
@@ -237,19 +252,22 @@ Results from actual test run (2026-04-10, Java 25, `-Xmx4g`):
   PureArrow ms   = StAX parse + PureArrowBatchConsumer + ArrowStreamWriter (ms)
   PureArrow Pk   = peak Arrow off-heap (ALL batches accumulated in store → O(total_rows))
   Speedup (×)    = DuckDB total (parse+insert+export) / PureArrow total (parse+write)
+                   Values > 1.0× mean pure-Arrow is faster end-to-end
 ```
 
 **Analysis:**
 
 | Dimension | DuckDB Pipeline | Pure-Arrow Pipeline |
 |-----------|----------------|---------------------|
-| **Parse speed** (A/B, 1M rows) | ~17,500 ms total | ~12,252 ms (**1.4×** faster) |
-| **Parse speed** (C, 1M×1 rows) | ~32,825 ms total | ~16,336 ms (**2×** faster) |
-| **Parse speed** (F, 2M rows) | ~28,837 ms total | ~17,710 ms (**1.6×** faster) |
-| **Parse speed** (G, 4M rows) | ~60,531 ms total | ~36,047 ms (**1.7×** faster) |
+| **Parse speed** (A/B, 1M rows) | ~16,000 ms total | ~11,700 ms (**1.4×** faster) |
+| **Parse speed** (C, 1M×1 rows) | ~32,168 ms total | ~16,390 ms (**2×** faster) |
+| **Parse speed** (F, 2M rows) | ~31,515 ms total | ~17,586 ms (**1.8×** faster) |
+| **Parse speed** (G, 4M rows) | ~65,792 ms total | ~35,273 ms (**1.9×** faster) |
 | **Peak off-heap** (A, 1M rows) | **~30 MB** (bounded — 1 batch) | **~463 MB** (all batches in store) |
 | **Peak off-heap** (F, 2M rows) | **~30 MB** (bounded) | **~896 MB** |
 | **Peak off-heap** (G, 4M rows) | **~30 MB** (bounded) | **~1,791 MB** |
+| **Peak off-heap** (H/I, 2K rows) | **~2 MB** (bounded) | **~2 MB** (tiny — no accumulation effect) |
+| **Peak off-heap** (J, 1 row) | **~1.7 MB** (bounded) | **~1.7 MB** (unitary baseline) |
 | **Arrow file output** | Same size (same schema) | Same size |
 | **SQL queries at ingest** | ✅ Available immediately | ❌ Not available |
 | **Pod memory budget** | Low: ~31 MB Arrow + DuckDB RSS | High: grows O(total_rows) |
@@ -332,7 +350,7 @@ pgw-validator :   4 tests — BUILD SUCCESS
   ParsePipelineTest          :  4 tests — PASS
   StreamingPipelineTest      :  4 tests — PASS
   MemoryLeakVerificationTest :  3 tests — PASS  (103 iterations, 0 bytes leaked)
-  IngestionBenchmarkTest     :  1 test  — PASS  (Types A–G, peak ~31–52 MB DuckDB off-heap)
+  IngestionBenchmarkTest     :  1 test  — PASS  (Types A–J, peak ~31–52 MB DuckDB off-heap)
   ─────────────────────────────────────────────
   Subtotal                   : 12 tests — BUILD SUCCESS
 
@@ -342,8 +360,8 @@ pgw-validator :   4 tests — BUILD SUCCESS
   PureArrowParsePipelineTest        :  5 tests — PASS
   PureArrowStreamingPipelineTest    :  3 tests — PASS
   PureArrowMemoryLeakVerificationTest: 2 tests — PASS  (100 iterations, 0 bytes leaked)
-  PureArrowIngestionBenchmarkTest   :  1 test  — PASS  (Types A–G, peak 463 MB–1.8 GB off-heap)
-  PipelineComparisonBenchmarkTest   :  1 test  — PASS  (DuckDB vs Pure Arrow, 1.4–3.8× speedup)
+  PureArrowIngestionBenchmarkTest   :  1 test  — PASS  (Types A–J, peak 463 MB–1.8 GB off-heap)
+  PipelineComparisonBenchmarkTest   :  1 test  — PASS  (DuckDB vs Pure Arrow A–J, 1.4–6.5× speedup)
   ─────────────────────────────────────────────
   Subtotal                          : 12 tests — BUILD SUCCESS
 
@@ -361,4 +379,4 @@ pgw-validator :   4 tests — BUILD SUCCESS
 ══════════════════════════════════════════════════════════════
 ```
 
-**All 30 tests pass. Benchmark data above is from actual test runs on 2026-04-10 (Java 25, -Xmx4g).**
+**All 30 tests pass. Benchmark data above is from actual test runs on 2026-04-10 (Java 25 Temurin 25.0.2, -Xmx8g).**

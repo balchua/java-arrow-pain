@@ -52,7 +52,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>Transaction row count (must match)</li>
  * </ul>
  *
- * <p>Types A–G are benchmarked; large types (F, G) use a 4 GB allocator limit.</p>
+ * <p>Types A–J are benchmarked; large types (F, G) use a 4 GB allocator limit.</p>
  */
 class PipelineComparisonBenchmarkTest {
 
@@ -89,7 +89,7 @@ class PipelineComparisonBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Pipeline comparison — DuckDB vs Pure Arrow — all types A through G")
+    @DisplayName("Pipeline comparison — DuckDB vs Pure Arrow — all types A through J")
     void pipelineComparisonAllTypes() throws Exception {
         RESULTS.add(runComparison(TestPainFileSpecs.TYPE_A, LARGE_ALLOCATOR_LIMIT));
         RESULTS.add(runComparison(TestPainFileSpecs.TYPE_B, LARGE_ALLOCATOR_LIMIT));
@@ -98,6 +98,9 @@ class PipelineComparisonBenchmarkTest {
         RESULTS.add(runComparison(TestPainFileSpecs.TYPE_E, LARGE_ALLOCATOR_LIMIT));
         RESULTS.add(runComparison(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
         RESULTS.add(runComparison(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
+        RESULTS.add(runComparison(TestPainFileSpecs.TYPE_H, LARGE_ALLOCATOR_LIMIT));
+        RESULTS.add(runComparison(TestPainFileSpecs.TYPE_I, LARGE_ALLOCATOR_LIMIT));
+        RESULTS.add(runComparison(TestPainFileSpecs.TYPE_J, LARGE_ALLOCATOR_LIMIT));
 
         // Both pipelines must produce identical row counts
         for (ComparisonResult r : RESULTS) {
@@ -113,6 +116,9 @@ class PipelineComparisonBenchmarkTest {
         assertEquals(200L,       RESULTS.get(4).txRows(), "Type E: expected 200 tx rows");
         assertEquals(2_000_000L, RESULTS.get(5).txRows(), "Type F: expected 2M tx rows");
         assertEquals(4_000_000L, RESULTS.get(6).txRows(), "Type G: expected 4M tx rows");
+        assertEquals(2_000L,     RESULTS.get(7).txRows(), "Type H: expected 2000 tx rows");
+        assertEquals(2_000L,     RESULTS.get(8).txRows(), "Type I: expected 2000 tx rows");
+        assertEquals(1L,         RESULTS.get(9).txRows(), "Type J: expected 1 tx row");
     }
 
     @AfterAll

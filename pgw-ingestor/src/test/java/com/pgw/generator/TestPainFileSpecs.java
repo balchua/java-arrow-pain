@@ -48,8 +48,13 @@ public final class TestPainFileSpecs {
             "Type H (10 PmtInf × 200 TxInf)",
             "pain001_type_h_10x200.xml", 10, 200);
 
-    /** Type J: 5 PmtInf × 400 CdtTrfTxInf — 5 remittances, 2000 transactions total. */
+    /** Type I: 5 PmtInf × 400 CdtTrfTxInf — 5 remittances, 2000 transactions total. */
+    public static final PainFileSpec TYPE_I = new PainFileSpec(
+            "Type I (5 PmtInf × 400 TxInf)",
+            "pain001_type_i_5x400.xml", 5, 400);
+
+    /** Type J: 1 PmtInf × 1 CdtTrfTxInf — unitary baseline, 1 remittance, 1 transaction. */
     public static final PainFileSpec TYPE_J = new PainFileSpec(
-            "Type J (5 PmtInf × 400 TxInf)",
-            "pain001_type_j_5x400.xml", 5, 400);
+            "Type J (1 PmtInf × 1 TxInf — unitary)",
+            "pain001_type_j_1x1.xml", 1, 1);
 }

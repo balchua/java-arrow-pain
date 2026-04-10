@@ -29,6 +29,18 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- Shared Arrow infrastructure (schema, parser, generator, benchmark) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+        </dependency>
+
+        <!-- Pure-Java domain layer (VOs, exceptions, models, domain services) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-domain</artifactId>
+        </dependency>
+
         <!-- Logging API (transitive from pgw-ingestor but declared explicitly) -->
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -46,6 +58,15 @@
         <dependency>
             <groupId>com.pgw</groupId>
             <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- pgw-common test-jar — provides TestFileGenerator, TestPainFileSpecs (canonical copy) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>

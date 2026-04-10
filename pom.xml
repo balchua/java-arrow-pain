@@ -17,9 +17,11 @@
     </description>
 
     <modules>
+        <module>pgw-common</module>
+        <module>pgw-domain</module>
         <module>pgw-ingestor</module>
-        <module>pgw-validator</module>
         <module>pgw-ingestor-pure-arrow</module>
+        <module>pgw-validator</module>
     </modules>
 
     <properties>
@@ -57,6 +59,18 @@
                 <groupId>org.apache.arrow</groupId>
                 <artifactId>arrow-c-data</artifactId>
                 <version>${arrow.version}</version>
+            </dependency>
+
+            <!-- PGW internal modules -->
+            <dependency>
+                <groupId>com.pgw</groupId>
+                <artifactId>pgw-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.pgw</groupId>
+                <artifactId>pgw-domain</artifactId>
+                <version>${project.version}</version>
             </dependency>
 
             <!-- DuckDB -->

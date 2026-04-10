@@ -22,18 +22,18 @@ jobs:
           java-version: '25'
           cache: maven
 
-      - name: Build (skip tests)
+      - name: Build and install all modules (skip tests)
         run: |
           MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-            mvn clean package -DskipTests -q
+            mvn clean install -DskipTests -q
 
       # These tests use only the Arrow C Data Interface (built into DuckDB JDBC)
       # — no community arrow extension required.
       - name: Run tests — parse pipeline, memory leak, validation (no arrow extension)
         run: |
           MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-            mvn test -pl pgw-ingestor,pgw-validator \
-            -Dtest="ParsePipelineTest,MemoryLeakVerificationTest,ValidationTest"
+            mvn test -pl pgw-ingestor,pgw-ingestor-pure-arrow,pgw-validator \
+            -Dtest="ParsePipelineTest,MemoryLeakVerificationTest,ValidationTest,PureArrowParsePipelineTest,PureArrowMemoryLeakVerificationTest,PureArrowStreamingPipelineTest"
 
       # StreamingPipelineTest verifies COPY TO (FORMAT arrow) and read_arrow()
       # — requires the DuckDB Arrow community extension.
@@ -65,10 +65,10 @@ jobs:
       - name: Install DuckDB Arrow extension
         run: bash install-arrow-extension.sh
 
-      - name: Build (skip tests)
+      - name: Build and install all modules (skip tests)
         run: |
           MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-            mvn clean package -DskipTests -q
+            mvn clean install -DskipTests -q
 
       - name: Arrow file → DuckDB load benchmark (all types A–E)
         run: |

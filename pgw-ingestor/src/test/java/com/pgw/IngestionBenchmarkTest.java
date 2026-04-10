@@ -67,7 +67,7 @@ class IngestionBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Ingestion benchmark — XML → DuckDB INSERT → ArrowIpc.export() — all types A through G")
+    @DisplayName("Ingestion benchmark — XML → DuckDB INSERT → ArrowIpc.export() — all types A through K")
     void ingestionBenchmarkAllTypes() throws Exception {
         List<IngestionResult> results = new ArrayList<>();
 
@@ -78,6 +78,9 @@ class IngestionBenchmarkTest {
         results.add(runIngestion(TestPainFileSpecs.TYPE_E, SMALL_ALLOCATOR_LIMIT));
         results.add(runIngestion(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
         results.add(runIngestion(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
+        results.add(runIngestion(TestPainFileSpecs.TYPE_H, SMALL_ALLOCATOR_LIMIT));
+        results.add(runIngestion(TestPainFileSpecs.TYPE_I, SMALL_ALLOCATOR_LIMIT));
+        results.add(runIngestion(TestPainFileSpecs.TYPE_J, SMALL_ALLOCATOR_LIMIT));
 
         printReport(results);
 
@@ -89,6 +92,9 @@ class IngestionBenchmarkTest {
         assertEquals(200L,       results.get(4).transactionRows(), "Type E: expected 200 tx rows");
         assertEquals(2_000_000L, results.get(5).transactionRows(), "Type F: expected 2M tx rows");
         assertEquals(4_000_000L, results.get(6).transactionRows(), "Type G: expected 4M tx rows");
+        assertEquals(2_000L,     results.get(7).transactionRows(), "Type H: expected 2000 tx rows");
+        assertEquals(2_000L,     results.get(8).transactionRows(), "Type I: expected 2000 tx rows");
+        assertEquals(1L,         results.get(9).transactionRows(), "Type J: expected 1 tx row");
 
         for (IngestionResult r : results) {
             assertTrue(r.parseAndInsertMs() >= 0, "Parse+insert time must be non-negative: " + r.label());

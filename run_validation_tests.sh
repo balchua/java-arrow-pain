@@ -35,18 +35,19 @@ echo ""
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# ── Step 1: compile ───────────────────────────────────────────────────────────
-echo "Step 1: Clean and compile all modules..."
+# ── Step 1: compile + install all modules ─────────────────────────────────────
+echo "Step 1: Clean, compile and install all modules..."
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
-  mvn clean compile -pl pgw-ingestor,pgw-validator --also-make 2>&1 | tail -5
+  mvn clean install -DskipTests 2>&1 | tail -10
 
 echo ""
-echo "Step 2: Running full test suite (pgw-ingestor + pgw-validator)..."
+echo "Step 2: Running full test suite (all 5 modules)..."
+echo "        pgw-common, pgw-domain, pgw-ingestor, pgw-ingestor-pure-arrow, pgw-validator"
 echo ""
 
 # ── Step 2: run tests, tee output ─────────────────────────────────────────────
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
-  mvn test -pl pgw-ingestor,pgw-validator 2>&1 | tee "$OUTPUT_FILE"
+  mvn test 2>&1 | tee "$OUTPUT_FILE"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
@@ -57,6 +58,10 @@ echo ""
 echo "Validation Times:"
 grep "Validation completed in" "$OUTPUT_FILE" | \
   sort -u | sed 's/.*INFO.*- /  /' || echo "  (none found)"
+
+echo ""
+echo "Pipeline Comparison (Pure Arrow speedup):"
+grep "Speedup\|speedup\|faster" "$OUTPUT_FILE" | grep -v "grep" | head -10 | sed 's/^/  /' || echo "  (see PipelineComparisonBenchmarkTest output above)"
 
 echo ""
 echo "Test Results:"
@@ -72,6 +77,6 @@ echo ""
 echo "Compare with a previous run:"
 echo "  diff -u $TEST_OUTPUT_DIR/test_run_<PREV>.log $OUTPUT_FILE"
 echo "Extract benchmark tables:"
-echo "  grep -A 20 'BENCHMARK:' $OUTPUT_FILE"
+echo "  grep -A 20 'PIPELINE COMPARISON\|Ingestion Benchmark\|Validation Benchmark' $OUTPUT_FILE"
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

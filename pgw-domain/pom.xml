@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.pgw</groupId>
+        <artifactId>pain001-arrow-loader</artifactId>
+        <version>1.0.0</version>
+    </parent>
+    <artifactId>pgw-domain</artifactId>
+    <packaging>jar</packaging>
+    <name>PGW Domain — ISO 20022 pain.001 Domain Model (VOs, exceptions, domain services)</name>
+    <description>
+        Pure-Java domain layer: value objects (IBAN, BIC, Amount, Currency, ControlSum),
+        domain exceptions, domain models (Message, Remittance, Transaction, PaymentMethod),
+        and domain service classes. No Arrow or DuckDB dependency.
+    </description>
+    <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g</argLine>
+                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

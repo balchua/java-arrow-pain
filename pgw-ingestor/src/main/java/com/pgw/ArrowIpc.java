@@ -138,8 +138,13 @@ public final class ArrowIpc {
         String tmpName = "__arrow_" + requireSafeIdentifier(tableName) + "_" + TMP_SEQ.getAndIncrement();
 
         try (var fis    = new FileInputStream(arrowFile.toFile());
-             var reader = new ArrowStreamReader(fis, allocator);
              var stream = ArrowArrayStream.allocateNew(allocator)) {
+
+            // ArrowStreamReader ownership is transferred to the C Data Interface
+            // stream by Data.exportArrayStream — DuckDB's release() callback will
+            // close the reader.  Do NOT place reader in try-with-resources here:
+            // closing it again after the stream release causes RefCnt < 0.
+            var reader = new ArrowStreamReader(fis, allocator);
 
             // Export lazily into the C Data Interface stream (no reading yet)
             Data.exportArrayStream(allocator, reader, stream);

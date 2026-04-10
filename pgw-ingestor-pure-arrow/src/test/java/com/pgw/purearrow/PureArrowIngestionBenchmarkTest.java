@@ -63,7 +63,7 @@ class PureArrowIngestionBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Pure Arrow benchmark — XML → Arrow IPC — all types A through G")
+    @DisplayName("Pure Arrow benchmark — XML → Arrow IPC — all types A through K")
     void ingestionBenchmarkAllTypes() throws Exception {
         RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_A, LARGE_ALLOCATOR_LIMIT));
         RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_B, LARGE_ALLOCATOR_LIMIT));
@@ -72,6 +72,9 @@ class PureArrowIngestionBenchmarkTest {
         RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_E, LARGE_ALLOCATOR_LIMIT));
         RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
         RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
+        RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_H, LARGE_ALLOCATOR_LIMIT));
+        RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_I, LARGE_ALLOCATOR_LIMIT));
+        RESULTS.add(runBenchmark(TestPainFileSpecs.TYPE_J, LARGE_ALLOCATOR_LIMIT));
 
         // Correctness assertions
         assertEquals(1_000_000L, RESULTS.get(0).transactionRows(), "Type A: expected 1M tx rows");
@@ -81,6 +84,9 @@ class PureArrowIngestionBenchmarkTest {
         assertEquals(200L,       RESULTS.get(4).transactionRows(), "Type E: expected 200 tx rows");
         assertEquals(2_000_000L, RESULTS.get(5).transactionRows(), "Type F: expected 2M tx rows");
         assertEquals(4_000_000L, RESULTS.get(6).transactionRows(), "Type G: expected 4M tx rows");
+        assertEquals(2_000L,     RESULTS.get(7).transactionRows(), "Type H: expected 2000 tx rows");
+        assertEquals(2_000L,     RESULTS.get(8).transactionRows(), "Type I: expected 2000 tx rows");
+        assertEquals(1L,         RESULTS.get(9).transactionRows(), "Type J: expected 1 tx row");
 
         assertEquals(1L,         RESULTS.get(0).messageRows(),     "Type A: expected 1 message row");
         assertEquals(1L,         RESULTS.get(1).messageRows(),     "Type B: expected 1 message row");
@@ -89,6 +95,9 @@ class PureArrowIngestionBenchmarkTest {
         assertEquals(1L,         RESULTS.get(4).messageRows(),     "Type E: expected 1 message row");
         assertEquals(1L,         RESULTS.get(5).messageRows(),     "Type F: expected 1 message row");
         assertEquals(1L,         RESULTS.get(6).messageRows(),     "Type G: expected 1 message row");
+        assertEquals(1L,         RESULTS.get(7).messageRows(),     "Type H: expected 1 message row");
+        assertEquals(1L,         RESULTS.get(8).messageRows(),     "Type I: expected 1 message row");
+        assertEquals(1L,         RESULTS.get(9).messageRows(),     "Type J: expected 1 message row");
 
         assertEquals(1L,         RESULTS.get(0).remittanceRows(),  "Type A: expected 1 remittance row");
         assertEquals(2L,         RESULTS.get(1).remittanceRows(),  "Type B: expected 2 remittance rows");
@@ -97,6 +106,9 @@ class PureArrowIngestionBenchmarkTest {
         assertEquals(2L,         RESULTS.get(4).remittanceRows(),  "Type E: expected 2 remittance rows");
         assertEquals(1L,         RESULTS.get(5).remittanceRows(),  "Type F: expected 1 remittance row");
         assertEquals(1L,         RESULTS.get(6).remittanceRows(),  "Type G: expected 1 remittance row");
+        assertEquals(10L,        RESULTS.get(7).remittanceRows(),  "Type H: expected 10 remittance rows");
+        assertEquals(5L,         RESULTS.get(8).remittanceRows(),  "Type I: expected 5 remittance rows");
+        assertEquals(1L,         RESULTS.get(9).remittanceRows(),  "Type J: expected 1 remittance row");
 
         for (BenchmarkResult r : RESULTS) {
             assertTrue(r.parseMs() >= 0,          "Parse time must be non-negative: "  + r.label());
@@ -109,31 +121,38 @@ class PureArrowIngestionBenchmarkTest {
         if (RESULTS.isEmpty()) return;
 
         System.out.println();
-        System.out.println("╔══════════════════════════════════════════════════════════════╗");
-        System.out.println("║   PURE ARROW INGESTION BENCHMARK SUMMARY (no DuckDB)        ║");
-        System.out.println("╠══════════╦═══════════╦══════════════╦═══════════╦═════════╣");
-        System.out.println("║  Type    ║  XML (MB) ║  Parse (ms)  ║  Tx Rows  ║ MB/sec  ║");
-        System.out.println("╠══════════╬═══════════╬══════════════╬═══════════╬═════════╣");
+        System.out.println("╔════════════════════════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║   PURE ARROW INGESTION BENCHMARK SUMMARY (no DuckDB)                                   ║");
+        System.out.println("╠══════════╦═══════════╦══════════════╦════════════════╦═══════════╦═════════╦══════════╣");
+        System.out.println("║  Type    ║  XML (MB) ║  Parse (ms)  ║ Peak Off-Heap  ║  Tx Rows  ║ MB/sec  ║Arrow(MB) ║");
+        System.out.println("╠══════════╬═══════════╬══════════════╬════════════════╬═══════════╬═════════╬══════════╣");
 
         for (BenchmarkResult r : RESULTS) {
             double xmlMb = r.xmlBytes() / (1024.0 * 1024.0);
+            double peakMb = r.peakOffHeapBytes() / (1024.0 * 1024.0);
+            double arrowMb = r.totalArrowBytes() / (1024.0 * 1024.0);
             double mbPerSec = r.parseMs() > 0
                     ? xmlMb / (r.parseMs() / 1000.0)
                     : 0.0;
-            System.out.printf("║  %-7s ║  %,7.1f  ║  %,10d  ║ %,9d ║ %,7.1f ║%n",
+            System.out.printf("║  %-7s ║  %,7.1f  ║  %,10d  ║  %,9.1f MB ║ %,9d ║ %,7.1f ║ %,7.1f ║%n",
                     r.label(),
                     xmlMb,
                     r.parseMs(),
+                    peakMb,
                     r.transactionRows(),
-                    mbPerSec);
+                    mbPerSec,
+                    arrowMb);
         }
 
-        System.out.println("╚══════════╩═══════════╩══════════════╩═══════════╩═════════╝");
+        System.out.println("╚══════════╩═══════════╩══════════════╩════════════════╩═══════════╩═════════╩══════════╝");
         System.out.println();
-        System.out.println("  XML (MB)     = source XML file size on disk");
-        System.out.println("  Parse (ms)   = StAX streaming parse + direct ArrowStreamWriter write");
-        System.out.println("  Tx Rows      = transaction rows ingested");
-        System.out.println("  MB/sec       = parse throughput (XML MB / parse seconds)");
+        System.out.println("  XML (MB)        = source XML file size on disk");
+        System.out.println("  Parse (ms)      = StAX streaming parse + direct ArrowStreamWriter write");
+        System.out.println("  Peak Off-Heap   = max Arrow allocator bytes while all ingested batches are in PureArrowInMemoryStore");
+        System.out.println("                    NOTE: larger than DuckDB path because ALL batches are kept in memory until store.close()");
+        System.out.println("  Tx Rows         = transaction rows ingested");
+        System.out.println("  MB/sec          = parse throughput (XML MB / parse seconds)");
+        System.out.println("  Arrow (MB)      = combined size of the 3 exported .arrow files on disk");
         System.out.println();
     }
 

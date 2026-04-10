@@ -3,55 +3,28 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-
     <parent>
         <groupId>com.pgw</groupId>
         <artifactId>pain001-arrow-loader</artifactId>
         <version>1.0.0</version>
     </parent>
-
-    <artifactId>pgw-ingestor</artifactId>
+    <artifactId>pgw-common</artifactId>
     <packaging>jar</packaging>
-
-    <name>PGW Ingestor — ISO 20022 pain.001 → Apache Arrow / DuckDB</name>
+    <name>PGW Common — Shared Arrow Infrastructure (parser, schema, benchmark, generator)</name>
     <description>
-        StAX streaming parser that reads ISO 20022 pain.001.001.09 XML files and loads them
-        into Apache Arrow columnar tables, with a single DuckDB sink for downstream SQL access
-        and Arrow file export via COPY TO (FORMAT arrow).
+        Shared infrastructure used by all PGW modules: Arrow schema definition,
+        benchmark utility, StAX parser interfaces and implementation, and XML generator.
+        No DuckDB dependency.
     </description>
-
     <dependencies>
-        <!-- Shared Arrow infrastructure (schema, parser, generator, benchmark) -->
-        <dependency>
-            <groupId>com.pgw</groupId>
-            <artifactId>pgw-common</artifactId>
-        </dependency>
-
-        <!-- Apache Arrow off-heap allocator -->
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory-unsafe</artifactId>
         </dependency>
-
-        <!-- Apache Arrow column vectors -->
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-vector</artifactId>
         </dependency>
-
-        <!-- Apache Arrow C Data Interface — zero-copy Arrow→DuckDB registration -->
-        <dependency>
-            <groupId>org.apache.arrow</groupId>
-            <artifactId>arrow-c-data</artifactId>
-        </dependency>
-
-        <!-- DuckDB JDBC driver for in-process SQL query engine -->
-        <dependency>
-            <groupId>org.duckdb</groupId>
-            <artifactId>duckdb_jdbc</artifactId>
-        </dependency>
-
-        <!-- Logging API -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
@@ -60,15 +33,12 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
         </dependency>
-
-        <!-- JUnit 5 — test scope only -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
-
     <build>
         <plugins>
             <plugin>
@@ -76,11 +46,12 @@
                 <artifactId>maven-jar-plugin</artifactId>
                 <executions>
                     <execution>
-                        <goals><goal>test-jar</goal></goals>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>

@@ -1,13 +1,15 @@
 # PGW — ISO 20022 pain.001 → Apache Arrow + DuckDB Loader
 
-📊 See [Test Results & Benchmark Report](TEST_RESULTS.md) for detailed performance data and test outcomes.
+📊 See [Test Results & Benchmark Report](TEST_RESULTS.md) for detailed performance data, test outcomes, and the DuckDB vs Pure-Arrow pipeline comparison.
 
 A study project that parses ISO 20022 **pain.001.001.09** (CustomerCreditTransferInitiation) XML files
 into **Apache Arrow** columnar in-memory tables using a streaming StAX parser — with no DOM, no JAXB,
 and no intermediate POJOs — then validates the data through a chainable SQL-based validation pipeline.
 
 The goal is to measure whether Apache Arrow's columnar format provides meaningful gains in **storage**,
-**memory**, and **analytical throughput** over raw XML for financial messaging workloads.
+**memory**, and **analytical throughput** over raw XML for financial messaging workloads, and to compare
+two Arrow ingest pipelines: one backed by DuckDB (SQL engine) and one that writes Arrow IPC files
+directly without any intermediate SQL layer.
 
 ---
 
@@ -31,41 +33,74 @@ The goal is to measure whether Apache Arrow's columnar format provides meaningfu
 ## Module Structure
 
 ```
-pain001-arrow-loader/           ← parent POM (com.pgw:pain001-arrow-loader)
-├── pgw-ingestor/               ← pure XML → Arrow → DuckDB pipeline (no domain)
-└── pgw-validator/              ← all domain (model + VOs + DAL) + validation + App
+pain001-arrow-loader/               ← parent POM (com.pgw:pain001-arrow-loader)
+├── pgw-common/                     ← shared infrastructure (Arrow schema, parser, generator, benchmark)
+├── pgw-domain/                     ← pure-Java domain layer (VOs, exceptions, models)
+├── pgw-ingestor/                   ← XML → Arrow → DuckDB pipeline (no domain)
+├── pgw-ingestor-pure-arrow/        ← XML → Arrow IPC only (no DuckDB at ingest time)
+└── pgw-validator/                  ← all domain services + validation + App
 ```
 
-### `pgw-ingestor` — Ingestion Pipeline
+**Build order:** `pgw-common` → `pgw-domain` → `pgw-ingestor` → `pgw-ingestor-pure-arrow` → `pgw-validator`
 
-Owns the ingestion concern only: StAX XML parsing, Apache Arrow schema definition,
-and DuckDB live-INSERT via Arrow C Data Interface. Contains **no domain objects** —
-its only output is a populated DuckDB connection, which can export Arrow files via
-`ArrowIpc.export()` (extension-less, one batch at a time).
+### `pgw-common` — Shared Arrow Infrastructure
+
+Holds all infrastructure shared by more than one module: Arrow schema definition, StAX parser
+interfaces and implementation, XML generator, and benchmark utility. No DuckDB dependency.
+
+```
+pgw-common/src/main/java/com/pgw/
+├── arrow/Pain001ArrowSchema.java   # Arrow schema definitions for all 3 tables
+├── benchmark/LoadBenchmark.java    # Timing, memory tracking, formatted report
+├── generator/
+│   ├── PainFileSpec.java           # Data record: file spec (name, counts, flags)
+│   ├── PainXmlGenerator.java       # Interface: generate(PainFileSpec, Path)
+│   └── PainXmlGeneratorImpl.java   # StAX XML generator implementation
+└── parser/
+    ├── BatchConsumer.java          # @FunctionalInterface: per-batch callback
+    ├── PainParser.java             # Interface: parseStreaming()
+    ├── PainParserImpl.java         # StAX impl — streaming path clears RAM per batch
+    └── ParseStats.java             # Lightweight result: (msgRows, rmtRows, txRows)
+```
+
+### `pgw-domain` — Pure-Java Domain Layer
+
+Holds value objects, domain exceptions, and domain models. No Arrow or DuckDB dependency.
+
+```
+pgw-domain/src/main/java/com/pgw/
+└── domain/
+    ├── exception/                  # Typed validation exceptions (IBAN, BIC, Amount, Currency, ControlSum)
+    ├── model/                      # Read-model records (Message, Remittance, Transaction, PaymentMethod)
+    └── valueobject/                # VOs with enforced invariants (Iban, Bic, Amount, Currency, ControlSum)
+```
+
+### `pgw-ingestor` — DuckDB Ingest Pipeline
+
+Owns the DuckDB ingest concern: StAX XML parsing → Arrow batch consumer → DuckDB live INSERT →
+`ArrowIpc.export()` via C Data Interface. No domain objects. Depends on `pgw-common`.
 
 ```
 pgw-ingestor/src/main/java/com/pgw/
-├── ArrowIpc.java                         # Extension-less Arrow export + load (C Data Interface)
-├── DuckDbFactory.java                    # Opens a plain DuckDB connection (no extension loading)
-├── arrow/
-│   └── Pain001ArrowSchema.java           # Arrow schema definitions for all 3 tables
-├── benchmark/
-│   └── LoadBenchmark.java                # Timing, memory tracking, formatted report
-├── generator/
-│   └── PainFileSpec.java                 # Data record: file spec (name, counts, invalidControlSum flag)
+├── ArrowIpc.java                   # Extension-less Arrow export + load (C Data Interface)
+├── DuckDbFactory.java              # Opens a plain DuckDB connection
 └── parser/
-    ├── PainParser.java                   # Interface: parseStreaming()
-    ├── PainParserImpl.java               # StAX impl — streaming path clears RAM per batch
-    ├── BatchConsumer.java                # @FunctionalInterface: per-batch callback
-    ├── ParseStats.java                   # Lightweight result: (msgRows, rmtRows, txRows)
-    └── StreamingBatchConsumer.java       # Single DuckDB sink: Arrow C Data Interface INSERT
+    └── StreamingBatchConsumer.java # Single DuckDB sink: Arrow C Data Interface INSERT
 ```
 
-### `pgw-validator` — Full Domain + DAL + Validation + Application
+### `pgw-ingestor-pure-arrow` — Pure-Arrow Ingest Pipeline (no DuckDB)
 
-Owns **all domain concerns**: ingestion read-model DTOs, validation value objects and
-exceptions, domain validators, the DuckDB-backed repository (DAL), the chainable SQL
-validation pipeline, and the `App` entry point. Depends on `pgw-ingestor`.
+Owns a DuckDB-free ingest path: StAX XML parsing → `PureArrowBatchConsumer` →
+`ArrowStreamWriter` → `.arrow` files. Depends on `pgw-common`. Same parser, same schema,
+different consumer — no SQL engine involved.
+
+```
+pgw-ingestor-pure-arrow/src/main/java/com/pgw/purearrow/
+├── PureArrowBatchConsumer.java     # BatchConsumer: VectorUnloader → store + ArrowStreamWriter
+├── PureArrowInMemoryStore.java     # Holds ArrowRecordBatch lists per table; AutoCloseable
+├── PureArrowIngestResult.java      # Record: ParseStats + store + 3 file paths
+└── PureArrowIngestor.java          # Orchestrates parse → consumer → result
+```
 
 ```
 pgw-validator/src/main/java/com/pgw/
@@ -111,27 +146,70 @@ pgw-validator/src/main/java/com/pgw/
         └── ParallelTransactionValidator.java
 ```
 
+### `pgw-validator` — Full Domain Services + DAL + Validation + Application
+
+Owns **all domain service concerns**: domain validators, the DuckDB-backed repository (DAL), the
+chainable SQL validation pipeline, and the `App` entry point. Depends on `pgw-common`, `pgw-domain`,
+and `pgw-ingestor`.
+
+```
+pgw-validator/src/main/java/com/pgw/
+├── App.java                              # Entry point — requires an existing pain.001 XML file path
+├── dal/
+│   ├── PaymentRepository.java            # Interface: streaming SQL access to message/remittance/transaction
+│   └── PaymentRepositoryImpl.java        # DuckDB implementation (zero-copy Arrow C Data Interface)
+├── domain/
+│   ├── model/                            # (copies also in pgw-domain) DTOs hydrated from DuckDB by the DAL
+│   ├── exception/                        # (copies also in pgw-domain) Typed validation exceptions
+│   ├── valueobject/                      # (copies also in pgw-domain) VOs with enforced invariants
+│   └── service/                          # Domain validators (depend on Validator/PaymentRepository)
+│       ├── MessageDomainValidator.java   # messageId ≤ 35, initiatingParty non-blank, CreDtTm ISO 8601
+│       ├── RemittanceDomainValidator.java
+│       ├── TransactionDomainValidator.java
+│       └── ControlSumDomainService.java  # streaming arithmetic: rmt-level + msg-level ControlSum.matches()
+└── validation/
+    ├── Validator.java                    # Interface: validate(PaymentRepository, ValidationContext)
+    ├── ValidationContext.java            # Thread-safe error/warning collection
+    ├── ValidationPipeline.java           # Fluent builder with virtual thread support
+    ├── ExecutionMode.java                # SEQUENTIAL, PARALLEL, AUTO
+    ├── ChainedValidator.java             # andThen() implementation
+    ├── VirtualThreadValidator.java       # Abstract base for virtual thread execution
+    └── validators/                       # SQL-based validators (via PaymentRepository)
+        ├── MessageValidator.java
+        ├── RemittanceValidator.java
+        ├── TransactionValidator.java
+        ├── ControlSumValidator.java
+        └── ParallelTransactionValidator.java
+```
+
 | Test class | Module | What it measures |
 |------------|--------|-----------------|
-| `SampleGenerationTest` | `pgw-ingestor` | XML sample generation (Types D + E) |
+| `ParsePipelineTest` | `pgw-ingestor` | StAX parser correctness |
 | `StreamingPipelineTest` | `pgw-ingestor` | Streaming memory footprint, DuckDB row counts, ArrowIpc export/load |
 | `MemoryLeakVerificationTest` | `pgw-ingestor` | 50-iteration streaming parse: 0 bytes leaked |
-| `ParsePipelineTest` | `pgw-ingestor` | StAX parser correctness |
+| `IngestionBenchmarkTest` | `pgw-ingestor` | XML → DuckDB → Arrow IPC benchmark (Types A–J) |
+| `PureArrowParsePipelineTest` | `pgw-ingestor-pure-arrow` | Pure-Arrow parser correctness (Types D + E) |
+| `PureArrowStreamingPipelineTest` | `pgw-ingestor-pure-arrow` | Memory footprint, row counts, IPC round-trip |
+| `PureArrowMemoryLeakVerificationTest` | `pgw-ingestor-pure-arrow` | 50-iteration zero-leak test (Types D + E) |
+| `PureArrowIngestionBenchmarkTest` | `pgw-ingestor-pure-arrow` | XML → Arrow IPC benchmark, no DuckDB (Types A–J) |
+| **`PipelineComparisonBenchmarkTest`** | `pgw-ingestor-pure-arrow` | **DuckDB vs Pure Arrow side-by-side comparison (Types A–J)** |
+| `ValidationTest` | `pgw-validator` | Domain validation correctness |
 | `ArrowFileLoadBenchmarkTest` | `pgw-validator` | Arrow file → DuckDB load time (no validation) |
 | `ValidationBenchmarkTest` | `pgw-validator` | Arrow→DuckDB load time **+ SQL validation time** |
-| `ValidationTest` | `pgw-validator` | Domain validation correctness |
 
 ---
 
 ## Pipeline Architecture
 
+### Pipeline A — DuckDB Ingest Pipeline (`pgw-ingestor`)
+
 ```
 ┌─────────────┐    StAX      ┌──────────────────────────────────────────────┐
 │  pain.001   │──streaming──▶│  PainParserImpl.parseStreaming()              │
 │  XML file   │   parse      │  (one VectorSchemaRoot per table, reused)     │
-└─────────────┘               └──────────────┬───────────────────────────────┘
-                                              │ BatchConsumer.accept() per 65k rows
-                                              ▼
+└─────────────┘              └──────────────┬───────────────────────────────┘
+                                             │ BatchConsumer.accept() per 65k rows
+                                             ▼
                               ┌──────────────────────────────────────────────┐
                               │  StreamingBatchConsumer                      │
                               │  └─ Single Sink: DuckDB (C Data Interface)   │
@@ -170,6 +248,37 @@ pgw-validator/src/main/java/com/pgw/
                                 │  └─ ControlSumDomainService ──▶     │  sequential
                                 └────────────────────────────────────┘
 ```
+
+### Pipeline B — Pure-Arrow Ingest Pipeline (`pgw-ingestor-pure-arrow`)
+
+```
+┌─────────────┐    StAX      ┌──────────────────────────────────────────────┐
+│  pain.001   │──streaming──▶│  PainParserImpl.parseStreaming()              │
+│  XML file   │   parse      │  (same parser as Pipeline A — from pgw-common)│
+└─────────────┘              └──────────────┬───────────────────────────────┘
+                                             │ BatchConsumer.accept() per 65k rows
+                                             ▼
+                              ┌──────────────────────────────────────────────┐
+                              │  PureArrowBatchConsumer                      │
+                              │  └─ VectorUnloader → PureArrowInMemoryStore  │
+                              │  └─ ArrowStreamWriter per table (lazy open)  │
+                              └──────────────────────────────────────────────┘
+                                             │
+                              ┌──────────────┴──────────────┐
+                              ▼                              ▼
+                    PureArrowInMemoryStore              .arrow files
+                    (ArrowRecordBatch lists)            (Arrow IPC stream,
+                     — released by close()              same format as Pipeline A)
+```
+
+**Key difference vs Pipeline A:** No DuckDB is involved during ingest. The XML is parsed
+directly into Arrow IPC stream files via `ArrowStreamWriter`. This eliminates the DuckDB
+INSERT round-trip and Arrow→DuckDB→Arrow overhead, making ingest significantly faster for
+scenarios where downstream DuckDB access is not needed at ingest time.
+
+See [TEST_RESULTS.md](TEST_RESULTS.md#duckdb-vs-pure-arrow-pipeline-comparison) for a
+side-by-side performance comparison of both pipelines across Types A–J.
+
 
 ### Arrow Export/Load — Extension-less C Data Interface
 
@@ -242,7 +351,17 @@ PAIN_LOCAL_OUTPUT_DIR=/data/arrows \
 # Fast tests only — no large file generation (Types D + E, ~200 rows each, < 5 s)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor \
-  -Dtest="SampleGenerationTest,StreamingPipelineTest,ParsePipelineTest"
+  -Dtest="StreamingPipelineTest,ParsePipelineTest"
+
+# Pure-Arrow fast tests (Types D + E only, < 5 s)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-ingestor-pure-arrow \
+  -Dtest="PureArrowParsePipelineTest,PureArrowStreamingPipelineTest"
+
+# Pipeline comparison benchmark (DuckDB vs Pure Arrow, Types A–J)
+# First run generates large files ~10 min; subsequent runs use cached files
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
+  mvn test -pl pgw-ingestor-pure-arrow -Dtest=PipelineComparisonBenchmarkTest
 
 # Validation-stage benchmark only (Arrow → DuckDB load + SQL validation)
 # Generates Types A–E Arrow files if absent; runs quickly once files exist
@@ -256,7 +375,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
 # ── Run the full test suite (all benchmarks) ──────────────────────────────────
 
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
-  mvn test -pl pgw-ingestor,pgw-validator
+  mvn test
 
 # Standardized before/after comparison script (saves timestamped log)
 ./run_validation_tests.sh
@@ -265,6 +384,20 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 ### How to read the benchmark tables
 
 When tests run, benchmark output is printed directly to the console (not redirected to a file):
+
+**PipelineComparisonBenchmarkTest** — DuckDB vs Pure Arrow ingest (side-by-side):
+```
+╔═══════════════════════════════════════════════════════════════════════════════════════════╗
+║     PIPELINE COMPARISON — DuckDB  vs  Pure Arrow  (XML → .arrow files)                   ║
+╠══════════╦══════════╦══════════════╦═══════════╦═════════╦══════════════╦═══════╦════════╣
+║  Type    ║ XML (MB) ║ DuckDB Prs+I ║ DuckDB Ex ║ DuckDB  ║ PureArrow ms ║ Tx    ║Speedup ║
+╠══════════╬══════════╬══════════════╬═══════════╬═════════╬══════════════╬═══════╬════════╣
+║  Type A  ║   734.4  ║       15,843 ║       578 ║ 29.9 MB ║        3,421 ║  1,0M ║  4.80× ║
+...
+╚══════════╩══════════╩══════════════╩═══════════╩═════════╩══════════════╩═══════╩════════╝
+  Speedup (×) = DuckDB total (parse+insert+export) / PureArrow total (parse+write)
+                Values > 1.0× mean pure-Arrow is faster end-to-end
+```
 
 **ArrowFileLoadBenchmarkTest** — Arrow file → DuckDB load (downstream simulation):
 ```
@@ -296,8 +429,14 @@ When tests run, benchmark output is printed directly to the console (not redirec
 | C | `pain001_type_c_1Mx1.xml` | Many small | 1,000,000 | 1 | 1,000,000 | Benchmark |
 | D | `pain001_type_d_2x100_valid.xml` | Small valid | 2 | 100 | 200 | Unit test |
 | E | `pain001_type_e_2x100_invalid_ctrlsum.xml` | Small invalid | 2 | 100 | 200 | Negative test |
+| F | `pain001_type_f_1x2M.xml` | Very fat batch | 1 | 2,000,000 | 2,000,000 | Large-scale benchmark |
+| G | `pain001_type_g_1x4M.xml` | Extreme batch | 1 | 4,000,000 | 4,000,000 | Extreme-scale benchmark |
+| H | `pain001_type_h_10x200.xml` | Multi-remittance | 10 | 200 | 2,000 | Multi-remittance correctness |
+| I | `pain001_type_i_5x400.xml` | Multi-remittance | 5 | 400 | 2,000 | Multi-remittance variant |
+| J | `pain001_type_j_1x1.xml` | Unitary | 1 | 1 | 1 | Unitary baseline |
 
-> Types A–C are large files (~516–888 MB) generated on demand. Types D–E are generated automatically by `mvn test`.
+> Types A–C, F, G are large files (~516 MB – 2.9 GB) not committed to the repo; generated on first test run.
+> Types D–E, H–J are small (< 2 MB) and generated automatically by `mvn test`.
 
 ---
 
@@ -366,12 +505,13 @@ Producer App                          Consumer App A
 ## Performance Results
 
 See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
-- Full pipeline benchmarks (all 5 types A–E)
-- Java heap delta and Arrow off-heap peak for every type
-- Per-table Arrow file sizes
-- Arrow IPC Stream → DuckDB downstream load times (via ArrowIpc — no extension)
+- **DuckDB pipeline benchmarks** — all 10 types A–J (parse+insert ms, export ms, peak off-heap)
+- **Pure-Arrow pipeline benchmarks** — all 10 types A–J (parse ms, peak off-heap)
+- **Side-by-side comparison** — DuckDB total vs Pure-Arrow, with speedup ratio per type
+- Arrow IPC Stream → DuckDB downstream load times (via `ArrowIpc.load()` — no extension)
+- Validation stage benchmark: DuckDB load ms + SQL validation ms separated
 - Memory leak verification: 50-iteration stress test, 0 bytes leaked
-- Full test suite summary (15 tests passing)
+- Full test suite summary (20+ tests passing)
 
 ---
 

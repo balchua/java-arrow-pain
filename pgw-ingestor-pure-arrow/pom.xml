@@ -34,6 +34,12 @@
             <artifactId>arrow-vector</artifactId>
         </dependency>
 
+        <!-- Shared Arrow infrastructure (schema, parser, generator, benchmark) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+        </dependency>
+
         <!-- Re-uses PainParser, PainParserImpl, BatchConsumer, ParseStats,
              Pain001ArrowSchema, PainFileSpec, PainXmlGenerator, LoadBenchmark.
              DuckDB and arrow-c-data are excluded to keep this module DuckDB-free. -->
@@ -70,6 +76,15 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Shared test utilities from pgw-common (TestPainFileSpecs, TestFileGenerator) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
         <!-- Shared test utilities from pgw-ingestor (TestPainFileSpecs, TestFileGenerator) -->
         <dependency>
             <groupId>com.pgw</groupId>
@@ -87,6 +102,18 @@
                     <artifactId>arrow-c-data</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <!-- DuckDB + arrow-c-data — test-scoped only, for PipelineComparisonBenchmarkTest -->
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

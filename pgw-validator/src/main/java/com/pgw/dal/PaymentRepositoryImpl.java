@@ -354,6 +354,39 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
     }
 
     @Override
+    public synchronized void streamAllTransactions(
+            java.util.function.Consumer<com.pgw.domain.model.Transaction> handler)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT pmt_inf_id, instr_id, end_to_end_id, instd_amt, ccy,"
+                        + " cdtr_agt_bicfi, cdtr_nm, cdtr_acct_iban, rmt_inf_ustrd, rglty_rptg_cd,"
+                        + " rmt_inf_strd_ref, rmt_inf_strd_ref_tp, purp_cd, ultmt_cdtr_nm, cdtr_ctry"
+                        + " FROM transactions")) {
+            ps.setFetchSize(1000);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    handler.accept(new com.pgw.domain.model.Transaction(
+                            rs.getString(1),
+                            rs.getString(2),
+                            rs.getString(3),
+                            rs.getBigDecimal(4),
+                            rs.getString(5),
+                            rs.getString(6),
+                            rs.getString(7),
+                            rs.getString(8),
+                            rs.getString(9),
+                            rs.getString(10),
+                            rs.getString(11),
+                            rs.getString(12),
+                            rs.getString(13),
+                            rs.getString(14),
+                            rs.getString(15)));
+                }
+            }
+        }
+    }
+
+    @Override
     public void close() throws Exception {
         conn.close();
         LOG.debug("PaymentRepositoryImpl closed");

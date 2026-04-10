@@ -237,7 +237,7 @@ pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates la
 
 ## `pgw-validator` — Validation Benchmark (`ValidationBenchmarkTest`)
 
-**Path:** `.arrow` files → `ArrowIpc.load()` → DuckDB → `ValidationPipeline.standard()`
+**Path:** `.arrow` files → `ArrowIpc.load()` → DuckDB → `ValidationPipeline.standard()` + `StreamingTransactionIteratorValidator`
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -245,29 +245,60 @@ pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates la
 ╠══════════╦════════════╦══════════════╦══════════════╦════════════════╦═══════════╦══════════════╦═══════════╣
 ║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║ Peak Off-Heap  ║  Tx Rows  ║ rows/ms (val)║  Result   ║
 ╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
-║  Type A   ║    301,712 ║          621 ║           77 ║    121,576,862 ║ 1,000,000 ║       12,987 ║ ✓ PASSED  ║
-║  Type B   ║    301,604 ║          805 ║           85 ║    121,566,686 ║ 1,000,000 ║       11,765 ║ ✓ PASSED  ║
-║  Type C   ║    506,780 ║        1,165 ║          331 ║    121,521,822 ║ 1,000,000 ║        3,021 ║ ✓ PASSED  ║
-║  Type D   ║         65 ║           15 ║            6 ║         70,486 ║       200 ║           33 ║ ✓ PASSED  ║
-║  Type E   ║         65 ║           15 ║            7 ║         70,486 ║       200 ║           29 ║ ✗ 3 err   ║
-║  Type F   ║    604,504 ║        1,218 ║          132 ║    121,904,534 ║ 2,000,000 ║       15,152 ║ ✓ PASSED  ║
-║  Type G   ║  1,210,090 ║        1,888 ║          250 ║    121,970,118 ║ 4,000,000 ║       16,000 ║ ✓ PASSED  ║
+║  Type A   ║    301,712 ║          768 ║           80 ║    121,576,862 ║ 1,000,000 ║       12,500 ║ ✓ PASSED  ║
+║  Type B   ║    301,604 ║          728 ║           82 ║    121,465,798 ║ 1,000,000 ║       12,195 ║ ✓ PASSED  ║
+║  Type C   ║    506,780 ║        1,336 ║          329 ║    121,511,222 ║ 1,000,000 ║        3,040 ║ ✓ PASSED  ║
+║  Type D   ║         65 ║           15 ║            7 ║         70,486 ║       200 ║           29 ║ ✓ PASSED  ║
+║  Type E   ║         65 ║           14 ║           11 ║         70,486 ║       200 ║           18 ║ ✗ 3 err   ║
+║  Type F   ║    604,504 ║        1,287 ║          128 ║    121,576,862 ║ 2,000,000 ║       15,625 ║ ✓ PASSED  ║
+║  Type G   ║  1,210,090 ║        1,899 ║          250 ║    121,970,078 ║ 4,000,000 ║       16,000 ║ ✓ PASSED  ║
 ╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
-║  TOTAL    ║  2,924,820 ║        5,727 ║          888 ║    121,970,118 ║ 9,000,400 ║       10,136 ║ —         ║
+║  TOTAL    ║  2,924,820 ║        6,047 ║          887 ║    121,970,078 ║ 9,000,400 ║       10,147 ║ —         ║
 ╚══════════╩════════════╩══════════════╩══════════════╩════════════════╩═══════════╩══════════════╩═══════════╝
 
   DuckDB ms      = time for ArrowIpc.load() per file (ArrowStreamReader → registerArrowStream → CREATE TABLE AS SELECT)
   Validate ms    = time for ValidationPipeline.standard() — SQL validators running in parallel virtual threads
   Peak Off-Heap  = Arrow allocator peak off-heap bytes during the ArrowIpc.load phase
   rows/ms (val)  = transaction row scan throughput during SQL validation
+
+╔══════════════════════════════════════════════════════════════════════╗
+║   Streaming Iteration Benchmark — StreamingTransactionIteratorValidator ║
+╠══════════╦═══════════╦════════════════╦══════════════╣
+║  Type    ║  Tx Rows  ║ Streaming ms   ║ rows/ms (str)║
+╠══════════╬═══════════╬════════════════╬══════════════╣
+║  Type A   ║ 1,000,000 ║          7,330 ║          136 ║
+║  Type B   ║ 1,000,000 ║          7,429 ║          135 ║
+║  Type C   ║ 1,000,000 ║          7,294 ║          137 ║
+║  Type D   ║       200 ║              2 ║          100 ║
+║  Type E   ║       200 ║              2 ║          100 ║
+║  Type F   ║ 2,000,000 ║         14,781 ║          135 ║
+║  Type G   ║ 4,000,000 ║         29,558 ║          135 ║
+╠══════════╬═══════════╬════════════════╬══════════════╣
+║  TOTAL    ║ 9,000,400 ║         66,396 ║          136 ║
+╚══════════╩═══════════╩════════════════╩══════════════╝
+
+  Streaming ms   = time for StreamingTransactionIteratorValidator to iterate all rows and
+                   map each into a Transaction POJO, checking instructedAmount > 0
+  rows/ms (str)  = transaction row streaming throughput (query + result fetch + object mapping + check)
+
+  ► Grand Total Streaming Time (all types A–G): 66,396 ms to iterate through 9,000,400 transaction rows
 ```
 
-- **TOTAL: 5,727 ms load + 888 ms validation** across 9,000,400 rows (7 types combined)
-- **Type F (2M rows):** loads in 1,218 ms, validates in 132 ms (15,152 rows/ms) — ✓ PASSED
-- **Type G (4M rows):** loads in 1,888 ms, validates in 250 ms (16,000 rows/ms) — ✓ PASSED
-- Type C is slowest to validate (331 ms) because it has 1M remittances to JOIN
+- **TOTAL: 6,047 ms load + 887 ms SQL validation** across 9,000,400 rows (7 types combined)
+- **Type F (2M rows):** loads in 1,287 ms, validates in 128 ms (15,625 rows/ms) — ✓ PASSED
+- **Type G (4M rows):** loads in 1,899 ms, validates in 250 ms (16,000 rows/ms) — ✓ PASSED
+- Type C is slowest to validate (329 ms) because it has 1M remittances to JOIN
 - Type E correctly reports **3 control-sum errors** (2 remittance-level + 1 message-level)
 - Peak off-heap ~122 MB for large types (bounded to one 65k-row batch per table at a time)
+
+### Streaming Iteration Observations (`StreamingTransactionIteratorValidator`)
+
+- **~135–137 rows/ms** for large types (A, B, C, F, G) — consistent and linear
+- **Streaming 1M rows takes ~7,300 ms** vs **80 ms for SQL validation** — ~91× slower
+- **Grand total: 66,396 ms to iterate through 9,000,400 transaction rows across all 7 types**
+- Confirms that row-by-row JDBC streaming through DuckDB has significant overhead compared to server-side SQL aggregation
+- This is the expected cost for use-cases that need per-record inspection (e.g., external API calls per transaction)
+- The `Transaction` POJO is materialized for every row: full `ResultSet` column extraction + object allocation included in the measured time
 
 ---
 
@@ -291,7 +322,7 @@ pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates la
 ══════════════════════════════════════════════════════════════
   ValidationTest             :  2 tests — PASS  (Type D passes, Type E fails correctly)
   ArrowFileLoadBenchmarkTest :  1 test  — PASS  (4M rows loaded in 2,129 ms, peak ~122 MB)
-  ValidationBenchmarkTest    :  1 test  — PASS  (load 5,727 ms + validate 888 ms, peak ~122 MB)
+  ValidationBenchmarkTest    :  1 test  — PASS  (load 6,047 ms + validate 887 ms + streaming 66,396 ms total for 9,000,400 rows, peak ~122 MB)
   ─────────────────────────────────────────────
   Subtotal                   :  4 tests — BUILD SUCCESS
 

@@ -19,6 +19,7 @@
     <modules>
         <module>pgw-ingestor</module>
         <module>pgw-validator</module>
+        <module>pgw-ingestor-pure-arrow</module>
     </modules>
 
     <properties>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pgw</groupId>
+        <artifactId>pain001-arrow-loader</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>pgw-ingestor-pure-arrow</artifactId>
+    <packaging>jar</packaging>
+
+    <name>PGW Pure Arrow Ingestor — ISO 20022 pain.001 → Apache Arrow only (no DuckDB)</name>
+    <description>
+        Parses ISO 20022 pain.001.001.09 XML files into Apache Arrow IPC Stream files
+        using a pure-Arrow pipeline (no DuckDB). Reuses PainParserImpl and Pain001ArrowSchema
+        from pgw-ingestor; replaces StreamingBatchConsumer with PureArrowBatchConsumer that
+        writes directly via ArrowStreamWriter.
+    </description>
+
+    <dependencies>
+        <!-- Apache Arrow off-heap allocator -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-unsafe</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow column vectors + IPC reader/writer -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+        </dependency>
+
+        <!-- Re-uses PainParser, PainParserImpl, BatchConsumer, ParseStats,
+             Pain001ArrowSchema, PainFileSpec, PainXmlGenerator, LoadBenchmark.
+             DuckDB and arrow-c-data are excluded to keep this module DuckDB-free. -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.duckdb</groupId>
+                    <artifactId>duckdb_jdbc</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.arrow</groupId>
+                    <artifactId>arrow-c-data</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Logging API -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+
+        <!-- JUnit 5 — test scope only -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Shared test utilities from pgw-ingestor (TestPainFileSpecs, TestFileGenerator) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.duckdb</groupId>
+                    <artifactId>duckdb_jdbc</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.arrow</groupId>
+                    <artifactId>arrow-c-data</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g</argLine>
+                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

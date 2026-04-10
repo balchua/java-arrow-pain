@@ -109,31 +109,38 @@ class PureArrowIngestionBenchmarkTest {
         if (RESULTS.isEmpty()) return;
 
         System.out.println();
-        System.out.println("╔══════════════════════════════════════════════════════════════╗");
-        System.out.println("║   PURE ARROW INGESTION BENCHMARK SUMMARY (no DuckDB)        ║");
-        System.out.println("╠══════════╦═══════════╦══════════════╦═══════════╦═════════╣");
-        System.out.println("║  Type    ║  XML (MB) ║  Parse (ms)  ║  Tx Rows  ║ MB/sec  ║");
-        System.out.println("╠══════════╬═══════════╬══════════════╬═══════════╬═════════╣");
+        System.out.println("╔════════════════════════════════════════════════════════════════════════════════════════╗");
+        System.out.println("║   PURE ARROW INGESTION BENCHMARK SUMMARY (no DuckDB)                                   ║");
+        System.out.println("╠══════════╦═══════════╦══════════════╦════════════════╦═══════════╦═════════╦══════════╣");
+        System.out.println("║  Type    ║  XML (MB) ║  Parse (ms)  ║ Peak Off-Heap  ║  Tx Rows  ║ MB/sec  ║Arrow(MB) ║");
+        System.out.println("╠══════════╬═══════════╬══════════════╬════════════════╬═══════════╬═════════╬══════════╣");
 
         for (BenchmarkResult r : RESULTS) {
             double xmlMb = r.xmlBytes() / (1024.0 * 1024.0);
+            double peakMb = r.peakOffHeapBytes() / (1024.0 * 1024.0);
+            double arrowMb = r.totalArrowBytes() / (1024.0 * 1024.0);
             double mbPerSec = r.parseMs() > 0
                     ? xmlMb / (r.parseMs() / 1000.0)
                     : 0.0;
-            System.out.printf("║  %-7s ║  %,7.1f  ║  %,10d  ║ %,9d ║ %,7.1f ║%n",
+            System.out.printf("║  %-7s ║  %,7.1f  ║  %,10d  ║  %,9.1f MB ║ %,9d ║ %,7.1f ║ %,7.1f ║%n",
                     r.label(),
                     xmlMb,
                     r.parseMs(),
+                    peakMb,
                     r.transactionRows(),
-                    mbPerSec);
+                    mbPerSec,
+                    arrowMb);
         }
 
-        System.out.println("╚══════════╩═══════════╩══════════════╩═══════════╩═════════╝");
+        System.out.println("╚══════════╩═══════════╩══════════════╩════════════════╩═══════════╩═════════╩══════════╝");
         System.out.println();
-        System.out.println("  XML (MB)     = source XML file size on disk");
-        System.out.println("  Parse (ms)   = StAX streaming parse + direct ArrowStreamWriter write");
-        System.out.println("  Tx Rows      = transaction rows ingested");
-        System.out.println("  MB/sec       = parse throughput (XML MB / parse seconds)");
+        System.out.println("  XML (MB)        = source XML file size on disk");
+        System.out.println("  Parse (ms)      = StAX streaming parse + direct ArrowStreamWriter write");
+        System.out.println("  Peak Off-Heap   = max Arrow allocator bytes while all ingested batches are in PureArrowInMemoryStore");
+        System.out.println("                    NOTE: larger than DuckDB path because ALL batches are kept in memory until store.close()");
+        System.out.println("  Tx Rows         = transaction rows ingested");
+        System.out.println("  MB/sec          = parse throughput (XML MB / parse seconds)");
+        System.out.println("  Arrow (MB)      = combined size of the 3 exported .arrow files on disk");
         System.out.println();
     }
 

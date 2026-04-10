@@ -290,6 +290,8 @@ class ValidationBenchmarkTest {
         System.out.println("  Streaming ms   = time for StreamingTransactionIteratorValidator to iterate all rows and");
         System.out.println("                   map each into a Transaction POJO, checking instructedAmount > 0");
         System.out.println("  rows/ms (str)  = transaction row streaming throughput (query + result fetch + object mapping + check)");
+        System.out.printf("%n  ► Grand Total Streaming Time (all types A–G): %,d ms to iterate through %,d transaction rows%n",
+                totalStreamMs, totalStreamRows);
         System.out.println();
     }
 }

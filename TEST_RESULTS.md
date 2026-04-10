@@ -266,20 +266,22 @@ pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates la
 ╠══════════╦═══════════╦════════════════╦══════════════╣
 ║  Type    ║  Tx Rows  ║ Streaming ms   ║ rows/ms (str)║
 ╠══════════╬═══════════╬════════════════╬══════════════╣
-║  Type A   ║ 1,000,000 ║          7,105 ║          141 ║
-║  Type B   ║ 1,000,000 ║          6,985 ║          143 ║
-║  Type C   ║ 1,000,000 ║          6,963 ║          144 ║
+║  Type A   ║ 1,000,000 ║          7,330 ║          136 ║
+║  Type B   ║ 1,000,000 ║          7,429 ║          135 ║
+║  Type C   ║ 1,000,000 ║          7,294 ║          137 ║
 ║  Type D   ║       200 ║              2 ║          100 ║
 ║  Type E   ║       200 ║              2 ║          100 ║
-║  Type F   ║ 2,000,000 ║         13,960 ║          143 ║
-║  Type G   ║ 4,000,000 ║         27,794 ║          144 ║
+║  Type F   ║ 2,000,000 ║         14,781 ║          135 ║
+║  Type G   ║ 4,000,000 ║         29,558 ║          135 ║
 ╠══════════╬═══════════╬════════════════╬══════════════╣
-║  TOTAL    ║ 9,000,400 ║         62,811 ║          143 ║
+║  TOTAL    ║ 9,000,400 ║         66,396 ║          136 ║
 ╚══════════╩═══════════╩════════════════╩══════════════╝
 
   Streaming ms   = time for StreamingTransactionIteratorValidator to iterate all rows and
                    map each into a Transaction POJO, checking instructedAmount > 0
   rows/ms (str)  = transaction row streaming throughput (query + result fetch + object mapping + check)
+
+  ► Grand Total Streaming Time (all types A–G): 66,396 ms to iterate through 9,000,400 transaction rows
 ```
 
 - **TOTAL: 6,047 ms load + 887 ms SQL validation** across 9,000,400 rows (7 types combined)
@@ -291,8 +293,9 @@ pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates la
 
 ### Streaming Iteration Observations (`StreamingTransactionIteratorValidator`)
 
-- **~141–144 rows/ms** for large types (A, B, C, F, G) — consistent and linear
-- **Streaming 1M rows takes ~7,000 ms** vs **80 ms for SQL validation** — ~87× slower
+- **~135–137 rows/ms** for large types (A, B, C, F, G) — consistent and linear
+- **Streaming 1M rows takes ~7,300 ms** vs **80 ms for SQL validation** — ~91× slower
+- **Grand total: 66,396 ms to iterate through 9,000,400 transaction rows across all 7 types**
 - Confirms that row-by-row JDBC streaming through DuckDB has significant overhead compared to server-side SQL aggregation
 - This is the expected cost for use-cases that need per-record inspection (e.g., external API calls per transaction)
 - The `Transaction` POJO is materialized for every row: full `ResultSet` column extraction + object allocation included in the measured time
@@ -319,7 +322,7 @@ pgw-validator :   4 tests — BUILD SUCCESS  (first run ~10 min — generates la
 ══════════════════════════════════════════════════════════════
   ValidationTest             :  2 tests — PASS  (Type D passes, Type E fails correctly)
   ArrowFileLoadBenchmarkTest :  1 test  — PASS  (4M rows loaded in 2,129 ms, peak ~122 MB)
-  ValidationBenchmarkTest    :  1 test  — PASS  (load 6,047 ms + validate 887 ms + streaming 62,811 ms, peak ~122 MB)
+  ValidationBenchmarkTest    :  1 test  — PASS  (load 6,047 ms + validate 887 ms + streaming 66,396 ms total for 9,000,400 rows, peak ~122 MB)
   ─────────────────────────────────────────────
   Subtotal                   :  4 tests — BUILD SUCCESS
 

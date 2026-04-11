@@ -54,21 +54,35 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- pgw-ingestor test-jar — provides TestFileGenerator, TestPainFileSpecs -->
-        <dependency>
-            <groupId>com.pgw</groupId>
-            <artifactId>pgw-ingestor</artifactId>
-            <version>${project.version}</version>
-            <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
         <!-- pgw-common test-jar — provides TestFileGenerator, TestPainFileSpecs (canonical copy) -->
         <dependency>
             <groupId>com.pgw</groupId>
             <artifactId>pgw-common</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Pure-Arrow ingestor — test-scoped: for ValidatorComparisonBenchmarkTest -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor-pure-arrow</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Pure-Arrow validator — test-scoped: for ValidatorComparisonBenchmarkTest -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-validator-pure-arrow</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- arrow-c-data — test-scoped: for ValidatorComparisonBenchmarkTest -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

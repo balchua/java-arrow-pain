@@ -67,6 +67,16 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Pure-Arrow ingestor — test-scoped: for PipelineComparisonBenchmarkTest -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-ingestor-pure-arrow</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- arrow-c-data is already in main scope above; no test-only re-declaration needed -->
     </dependencies>
 
     <build>

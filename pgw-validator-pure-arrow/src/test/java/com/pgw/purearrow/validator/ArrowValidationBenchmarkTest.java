@@ -5,7 +5,6 @@ import com.pgw.generator.TestFileGenerator;
 import com.pgw.generator.TestPainFileSpecs;
 import com.pgw.purearrow.PureArrowIngestor;
 import com.pgw.purearrow.PureArrowIngestResult;
-import com.pgw.purearrow.PureArrowInMemoryStore;
 import com.pgw.purearrow.validator.dal.ArrowPaymentRepositoryImpl;
 import com.pgw.purearrow.validator.dal.ArrowPaymentRepositoryLoader;
 import com.pgw.validation.ValidationContext;
@@ -135,39 +134,43 @@ class ArrowValidationBenchmarkTest {
                     ingestor.ingest(xmlFile, subDir, base, allocator, null);
             arrowIngestMs = System.currentTimeMillis() - ingestStart;
 
-            try (PureArrowInMemoryStore ignored = ingestResult.store()) {
-                totalArrowBytes = fileSizeOrZero(ingestResult.messageFile())
-                        + fileSizeOrZero(ingestResult.remittanceFile())
-                        + fileSizeOrZero(ingestResult.transactionFile());
+            totalArrowBytes = fileSizeOrZero(ingestResult.messageFile())
+                    + fileSizeOrZero(ingestResult.remittanceFile())
+                    + fileSizeOrZero(ingestResult.transactionFile());
 
-                // Phase 2: Load Arrow IPC files into ArrowPaymentRepositoryImpl
-                long loadStart = System.currentTimeMillis();
-                try (ArrowPaymentRepositoryImpl repo = ArrowPaymentRepositoryLoader.load(
-                        ingestResult.messageFile(),
-                        ingestResult.remittanceFile(),
-                        ingestResult.transactionFile(),
-                        allocator)) {
-                    arrowLoadMs = System.currentTimeMillis() - loadStart;
+            // Release the in-memory store before loading.  The .arrow files on disk are the
+            // canonical data source for the load phase; holding the store alive simultaneously
+            // would inflate peak off-heap by ~2× (store batches + repo batches in the same
+            // allocator) and obscure the true memory cost of the load+validate phases.
+            ingestResult.store().close();
 
-                    remittanceRows  = repo.getRemittanceCount();
-                    transactionRows = repo.getTransactionCount();
+            // Phase 2: Load Arrow IPC files into ArrowPaymentRepositoryImpl
+            long loadStart = System.currentTimeMillis();
+            try (ArrowPaymentRepositoryImpl repo = ArrowPaymentRepositoryLoader.load(
+                    ingestResult.messageFile(),
+                    ingestResult.remittanceFile(),
+                    ingestResult.transactionFile(),
+                    allocator)) {
+                arrowLoadMs = System.currentTimeMillis() - loadStart;
 
-                    // Phase 3: SQL-equivalent validation in pure Arrow / Java
-                    long valStart = System.nanoTime();
-                    ValidationContext ctx = ValidationPipeline.standard().execute(repo);
-                    validationMs = (System.nanoTime() - valStart) / 1_000_000L;
+                remittanceRows  = repo.getRemittanceCount();
+                transactionRows = repo.getTransactionCount();
 
-                    passed     = !ctx.hasErrors();
-                    errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+                // Phase 3: SQL-equivalent validation in pure Arrow / Java
+                long valStart = System.nanoTime();
+                ValidationContext ctx = ValidationPipeline.standard().execute(repo);
+                validationMs = (System.nanoTime() - valStart) / 1_000_000L;
 
-                    // Phase 4: Streaming row-by-row iteration (simulates per-record external checks)
-                    long streamStart = System.nanoTime();
-                    ValidationContext streamCtx = new ValidationContext();
-                    new StreamingTransactionIteratorValidator().validate(repo, streamCtx);
-                    streamingIterationMs = (System.nanoTime() - streamStart) / 1_000_000L;
+                passed     = !ctx.hasErrors();
+                errorCount = ctx.hasErrors() ? ctx.getErrors().size() : 0;
 
-                    peakOffHeap = allocator.getPeakMemoryAllocation();
-                }
+                // Phase 4: Streaming row-by-row iteration (simulates per-record external checks)
+                long streamStart = System.nanoTime();
+                ValidationContext streamCtx = new ValidationContext();
+                new StreamingTransactionIteratorValidator().validate(repo, streamCtx);
+                streamingIterationMs = (System.nanoTime() - streamStart) / 1_000_000L;
+
+                peakOffHeap = allocator.getPeakMemoryAllocation();
             }
         }
 
@@ -247,7 +250,8 @@ class ArrowValidationBenchmarkTest {
         System.out.println("  Ingest ms      = XML → StAX parse → PureArrowBatchConsumer → .arrow files (no DuckDB)");
         System.out.println("  Load ms        = time to materialise .arrow files into ArrowPaymentRepositoryImpl");
         System.out.println("  Validate ms    = time to run ValidationPipeline.standard() in pure Java/Arrow (no SQL)");
-        System.out.println("  Peak Off-Heap  = max Arrow allocator off-heap bytes (includes ingested + loaded batches)");
+        System.out.println("  Peak Off-Heap  = max Arrow allocator off-heap bytes during load+validate phases");
+        System.out.println("                   (in-memory store released before loading — only repo batches counted)");
         System.out.println("  rows/ms (val)  = transaction row scan throughput during validation");
         System.out.println();
 

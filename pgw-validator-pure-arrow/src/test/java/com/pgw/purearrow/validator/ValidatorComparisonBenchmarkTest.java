@@ -11,7 +11,6 @@ import com.pgw.parser.PainParserImpl;
 import com.pgw.parser.StreamingBatchConsumer;
 import com.pgw.purearrow.PureArrowIngestor;
 import com.pgw.purearrow.PureArrowIngestResult;
-import com.pgw.purearrow.PureArrowInMemoryStore;
 import com.pgw.purearrow.validator.dal.ArrowPaymentRepositoryImpl;
 import com.pgw.purearrow.validator.dal.ArrowPaymentRepositoryLoader;
 import com.pgw.validation.ValidationContext;
@@ -224,24 +223,28 @@ class ValidatorComparisonBenchmarkTest {
                     new PureArrowIngestor().ingest(xmlFile, arrowDir, base, allocator, null);
             arrowIngestMs = System.currentTimeMillis() - ingestStart;
 
-            try (PureArrowInMemoryStore ignored = ingestResult.store()) {
-                // Load: Arrow IPC files → ArrowPaymentRepositoryImpl
-                long loadStart = System.currentTimeMillis();
-                try (ArrowPaymentRepositoryImpl repo = ArrowPaymentRepositoryLoader.load(
-                        ingestResult.messageFile(),
-                        ingestResult.remittanceFile(),
-                        ingestResult.transactionFile(),
-                        allocator)) {
-                    arrowLoadMs = System.currentTimeMillis() - loadStart;
+            // Release the in-memory store before loading.  The .arrow files on disk are the
+            // canonical data source for the load phase; holding the store alive simultaneously
+            // would inflate peak off-heap by ~2× (store batches + repo batches in the same
+            // allocator) and obscure the true memory cost of the load+validate phases.
+            ingestResult.store().close();
 
-                    long valStart = System.nanoTime();
-                    ValidationContext ctx = ValidationPipeline.standard().execute(repo);
-                    arrowValidateMs = (System.nanoTime() - valStart) / 1_000_000L;
-                    arrowPassed     = !ctx.hasErrors();
-                    arrowErrors     = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+            // Load: Arrow IPC files → ArrowPaymentRepositoryImpl
+            long loadStart = System.currentTimeMillis();
+            try (ArrowPaymentRepositoryImpl repo = ArrowPaymentRepositoryLoader.load(
+                    ingestResult.messageFile(),
+                    ingestResult.remittanceFile(),
+                    ingestResult.transactionFile(),
+                    allocator)) {
+                arrowLoadMs = System.currentTimeMillis() - loadStart;
 
-                    arrowPeakOffHeapBytes = allocator.getPeakMemoryAllocation();
-                }
+                long valStart = System.nanoTime();
+                ValidationContext ctx = ValidationPipeline.standard().execute(repo);
+                arrowValidateMs = (System.nanoTime() - valStart) / 1_000_000L;
+                arrowPassed     = !ctx.hasErrors();
+                arrowErrors     = ctx.hasErrors() ? ctx.getErrors().size() : 0;
+
+                arrowPeakOffHeapBytes = allocator.getPeakMemoryAllocation();
             }
         }
 

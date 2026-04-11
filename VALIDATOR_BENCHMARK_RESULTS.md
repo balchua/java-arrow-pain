@@ -47,6 +47,88 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 pgw-validator :   4 tests — BUILD SUCCESS
 ```
 
+## `pgw-validator` — Arrow File → DuckDB Load Benchmark (`ArrowFileLoadBenchmarkTest`)
+
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
+
+```
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║           Arrow File -> DuckDB Load Benchmark - All Types (Downstream Consumer Simulation)                                   ║
+╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦════════════════╦══════════════╦═════════════╣
+║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║ Peak Off-Heap  ║  Rows/sec    ║  Tx Rows    ║
+╠══════════╬═══════════╬═══════════╬════════════╬═══════════╬════════════╬════════════════╬══════════════╬═════════════╣
+║  Type A   ║         0 ║         2 ║    301,709 ║   301,712 ║        740 ║    121,576,854 ║    1,351,352 ║   1,000,000 ║
+║  Type B   ║         0 ║         2 ║    301,600 ║   301,604 ║        706 ║    121,542,390 ║    1,416,433 ║   1,000,000 ║
+║  Type C   ║         0 ║   205,125 ║    301,654 ║   506,780 ║      1,350 ║    121,511,222 ║    1,481,481 ║   1,000,000 ║
+║  Type D   ║         0 ║         2 ║         61 ║        65 ║         15 ║         70,486 ║       13,466 ║         200 ║
+║  Type E   ║         0 ║         2 ║         61 ║        65 ║         15 ║         70,486 ║       13,466 ║         200 ║
+║  Type F   ║         0 ║         2 ║    604,501 ║   604,504 ║      1,340 ║    121,904,566 ║    1,492,538 ║   2,000,000 ║
+║  Type G   ║         0 ║         2 ║  1,210,086 ║ 1,210,090 ║      1,977 ║    121,970,078 ║    2,023,268 ║   4,000,000 ║
+║  Type H   ║         0 ║         4 ║        598 ║       604 ║         18 ║      1,053,750 ║      111,666 ║       2,000 ║
+║  Type I   ║         0 ║         3 ║        599 ║       603 ║         18 ║      1,053,750 ║      111,388 ║       2,000 ║
+║  Type J   ║         0 ║         2 ║          2 ║         5 ║         14 ║          5,944 ║          142 ║           1 ║
+╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩════════════════╩══════════════╩═════════════╝
+
+  Peak Off-Heap = Arrow allocator off-heap bytes after loading all 3 tables into DuckDB
+```
+
+## `pgw-validator` — DuckDB Load + SQL Validation Benchmark (`ValidationBenchmarkTest`)
+
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
+
+```
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║         Validation Stage Benchmark — Arrow File → DuckDB Load + SQL Validation                                              ║
+╠══════════╦════════════╦══════════════╦══════════════╦════════════════╦═══════════╦══════════════╦═══════════╣
+║  Type    ║ Arrow (KB) ║ DuckDB ms    ║ Validate ms  ║ Peak Off-Heap  ║  Tx Rows  ║ rows/ms (val)║  Result   ║
+╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
+║  Type A   ║    301,712 ║          869 ║           96 ║    121,576,862 ║ 1,000,000 ║       10,417 ║ ✓ PASSED  ║
+║  Type B   ║    301,604 ║          874 ║           88 ║    121,566,686 ║ 1,000,000 ║       11,364 ║ ✓ PASSED  ║
+║  Type C   ║    506,780 ║        1,580 ║          362 ║    121,511,222 ║ 1,000,000 ║        2,762 ║ ✓ PASSED  ║
+║  Type D   ║         65 ║           16 ║            6 ║         70,486 ║       200 ║           33 ║ ✓ PASSED  ║
+║  Type E   ║         65 ║           18 ║           10 ║         70,486 ║       200 ║           20 ║ ✗ 3 err   ║
+║  Type F   ║    604,504 ║        1,596 ║          136 ║    121,970,102 ║ 2,000,000 ║       14,706 ║ ✓ PASSED  ║
+║  Type G   ║  1,210,090 ║        2,325 ║          249 ║    121,970,070 ║ 4,000,000 ║       16,064 ║ ✓ PASSED  ║
+║  Type H   ║        604 ║           16 ║            8 ║      1,053,750 ║     2,000 ║          250 ║ ✓ PASSED  ║
+║  Type I   ║        603 ║           17 ║            7 ║      1,053,750 ║     2,000 ║          286 ║ ✓ PASSED  ║
+║  Type J   ║          5 ║           13 ║            7 ║          5,944 ║         1 ║            0 ║ ✓ PASSED  ║
+╠══════════╬════════════╬══════════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
+║  TOTAL    ║  2,926,032 ║        7,324 ║          969 ║    121,970,102 ║ 9,004,401 ║        9,292 ║ —         ║
+╚══════════╩════════════╩══════════════╩══════════════╩════════════════╩═══════════╩══════════════╩═══════════╝
+
+  Arrow (KB)     = combined size of the 3 .arrow IPC files on disk
+  DuckDB ms      = time to load Arrow IPC files into DuckDB via ArrowIpc.load() (C Data Interface)
+  Validate ms    = time to run ValidationPipeline.standard() via SQL (IBAN MOD-97, BIC, ControlSum, …)
+  Peak Off-Heap  = max Arrow allocator off-heap bytes after loading (stays ~120 MB for large types)
+  rows/ms (val)  = transaction row throughput during SQL validation phase
+```
+
+## `pgw-validator` — Streaming Iteration Benchmark (`StreamingTransactionIteratorValidator`)
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║   Streaming Iteration Benchmark — StreamingTransactionIteratorValidator ║
+╠══════════╦═══════════╦════════════════╦══════════════╣
+║  Type    ║  Tx Rows  ║ Streaming ms   ║ rows/ms (str)║
+╠══════════╬═══════════╬════════════════╬══════════════╣
+║  Type A   ║ 1,000,000 ║          7,879 ║          127 ║
+║  Type B   ║ 1,000,000 ║          7,743 ║          129 ║
+║  Type C   ║ 1,000,000 ║          7,532 ║          133 ║
+║  Type D   ║       200 ║              3 ║           67 ║
+║  Type E   ║       200 ║              2 ║          100 ║
+║  Type F   ║ 2,000,000 ║         15,106 ║          132 ║
+║  Type G   ║ 4,000,000 ║         29,748 ║          134 ║
+║  Type H   ║     2,000 ║             16 ║          125 ║
+║  Type I   ║     2,000 ║             16 ║          125 ║
+║  Type J   ║         1 ║              0 ║            1 ║
+╠══════════╬═══════════╬════════════════╬══════════════╣
+║  TOTAL    ║ 9,004,401 ║         68,045 ║          132 ║
+╚══════════╩═══════════╩════════════════╩══════════════╝
+
+  Streaming ms   = time for StreamingTransactionIteratorValidator to iterate rows via JDBC cursor
+  ► Grand Total: 68,045 ms for 9,004,401 rows  ≈ 132 rows/ms (DuckDB JDBC streaming)
+```
+
 ---
 
 # `pgw-validator-pure-arrow` — Arrow-backed Validation (no DuckDB)
@@ -115,7 +197,7 @@ pgw-validator-pure-arrow :  6 tests — BUILD SUCCESS
 
 ## `pgw-validator-pure-arrow` — Benchmark (Types A–J)
 
-Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -123,23 +205,23 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
 ╠══════════╦════════════╦═══════════════╦═══════════╦══════════════╦════════════════╦═══════════╦══════════════╦═══════════╣
 ║  Type    ║ Arrow (KB) ║  Ingest ms    ║  Load ms  ║ Validate ms  ║ Peak Off-Heap  ║  Tx Rows  ║ rows/ms (val)║  Result   ║
 ╠══════════╬════════════╬═══════════════╬═══════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
-║  Type A   ║    301,712 ║        12,263 ║        58 ║        3,110 ║    797,554,824 ║ 1,000,000 ║          322 ║ ✓ PASSED  ║
-║  Type B   ║    301,604 ║        10,697 ║        50 ║        3,045 ║    797,444,240 ║ 1,000,000 ║          328 ║ ✓ PASSED  ║
-║  Type C   ║    506,780 ║        17,433 ║        77 ║        6,237 ║  1,397,565,328 ║ 1,000,000 ║          160 ║ ✓ PASSED  ║
-║  Type D   ║         65 ║             6 ║         2 ║            1 ║      1,852,672 ║       200 ║          200 ║ ✓ PASSED  ║
+║  Type A   ║    301,712 ║        12,147 ║        67 ║        2,929 ║    797,554,824 ║ 1,000,000 ║          341 ║ ✓ PASSED  ║
+║  Type B   ║    301,604 ║        10,881 ║       125 ║        2,866 ║    797,444,240 ║ 1,000,000 ║          349 ║ ✓ PASSED  ║
+║  Type C   ║    506,780 ║        18,172 ║       118 ║        6,281 ║  1,397,565,328 ║ 1,000,000 ║          159 ║ ✓ PASSED  ║
+║  Type D   ║         65 ║             7 ║         1 ║            1 ║      1,852,672 ║       200 ║          200 ║ ✓ PASSED  ║
 ║  Type E   ║         65 ║             4 ║         1 ║            4 ║      1,852,672 ║       200 ║           50 ║ ✗ 3 err   ║
-║  Type F   ║    604,504 ║        19,096 ║       101 ║        6,125 ║  1,564,876,240 ║ 2,000,000 ║          327 ║ ✓ PASSED  ║
-║  Type G   ║  1,210,090 ║        37,998 ║       300 ║       12,137 ║  3,117,643,784 ║ 4,000,000 ║          330 ║ ✓ PASSED  ║
-║  Type H   ║        604 ║            22 ║         1 ║            6 ║      3,133,696 ║     2,000 ║          333 ║ ✓ PASSED  ║
-║  Type I   ║        603 ║            21 ║         1 ║            6 ║      3,131,648 ║     2,000 ║          333 ║ ✓ PASSED  ║
-║  Type J   ║          6 ║             1 ║         1 ║            0 ║      1,787,648 ║         1 ║            1 ║ ✓ PASSED  ║
+║  Type F   ║    604,504 ║        19,998 ║        96 ║        5,807 ║  1,564,876,240 ║ 2,000,000 ║          344 ║ ✓ PASSED  ║
+║  Type G   ║  1,210,090 ║        40,187 ║     1,516 ║       11,548 ║  3,117,643,784 ║ 4,000,000 ║          346 ║ ✓ PASSED  ║
+║  Type H   ║        604 ║            24 ║         1 ║            8 ║      3,133,696 ║     2,000 ║          250 ║ ✓ PASSED  ║
+║  Type I   ║        603 ║            22 ║         1 ║            6 ║      3,131,648 ║     2,000 ║          333 ║ ✓ PASSED  ║
+║  Type J   ║          6 ║             2 ║         1 ║            0 ║      1,787,648 ║         1 ║            1 ║ ✓ PASSED  ║
 ╠══════════╬════════════╬═══════════════╬═══════════╬══════════════╬════════════════╬═══════════╬══════════════╬═══════════╣
-║  TOTAL    ║  2,926,033 ║        97,541 ║       592 ║       30,671 ║  3,117,643,784 ║ 9,004,401 ║          294 ║ —         ║
+║  TOTAL    ║  2,926,033 ║       101,444 ║     1,927 ║       29,450 ║  3,117,643,784 ║ 9,004,401 ║          306 ║ —         ║
 ╚══════════╩════════════╩═══════════════╩═══════════╩══════════════╩════════════════╩═══════════╩══════════════╩═══════════╝
 
   Arrow (KB)     = combined size of the 3 .arrow IPC files on disk
   Ingest ms      = XML → StAX parse → PureArrowBatchConsumer → .arrow files (no DuckDB)
-  Load ms        = time to materialise .arrow files into ArrowPaymentRepositoryImpl
+  Load ms        = time to materialise .arrow files into ArrowPaymentRepositoryImpl (zero-copy TransferPair)
   Validate ms    = time to run ValidationPipeline.standard() in pure Java/Arrow (no SQL)
   Peak Off-Heap  = max Arrow allocator off-heap bytes (includes ingested + loaded batches)
                    NOTE: much larger than DuckDB path because all batches stay in Arrow allocator
@@ -154,28 +236,28 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
 ╠══════════╦═══════════╦════════════════╦══════════════╣
 ║  Type    ║  Tx Rows  ║ Streaming ms   ║ rows/ms (str)║
 ╠══════════╬═══════════╬════════════════╬══════════════╣
-║  Type A   ║ 1,000,000 ║          1,506 ║          664 ║
-║  Type B   ║ 1,000,000 ║          1,515 ║          660 ║
-║  Type C   ║ 1,000,000 ║          1,559 ║          641 ║
+║  Type A   ║ 1,000,000 ║          1,420 ║          704 ║
+║  Type B   ║ 1,000,000 ║          1,427 ║          701 ║
+║  Type C   ║ 1,000,000 ║          1,616 ║          619 ║
 ║  Type D   ║       200 ║              0 ║          200 ║
 ║  Type E   ║       200 ║              0 ║          200 ║
-║  Type F   ║ 2,000,000 ║          3,029 ║          660 ║
-║  Type G   ║ 4,000,000 ║          5,999 ║          667 ║
+║  Type F   ║ 2,000,000 ║          2,903 ║          689 ║
+║  Type G   ║ 4,000,000 ║          5,771 ║          693 ║
 ║  Type H   ║     2,000 ║              2 ║        1,000 ║
 ║  Type I   ║     2,000 ║              2 ║        1,000 ║
 ║  Type J   ║         1 ║              0 ║            1 ║
 ╠══════════╬═══════════╬════════════════╬══════════════╣
-║  TOTAL    ║ 9,004,401 ║         13,612 ║          662 ║
+║  TOTAL    ║ 9,004,401 ║         13,141 ║          685 ║
 ╚══════════╩═══════════╩════════════════╩══════════════╝
 
   Streaming ms   = time for StreamingTransactionIteratorValidator to iterate all rows
                    directly from Arrow vectors (no SQL, no JDBC cursor)
-  ► Grand Total: 13,612 ms for 9,004,401 rows  ≈ 662 rows/ms pure Arrow vector iteration
+  ► Grand Total: 13,141 ms for 9,004,401 rows  ≈ 685 rows/ms pure Arrow vector iteration
 ```
 
 ## `pgw-validator-pure-arrow` — DuckDB SQL vs Pure-Arrow Comparison (ValidatorComparisonBenchmarkTest)
 
-Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -184,31 +266,31 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
 ║          ║              DuckDB path (SQL)                                   ║            Pure-Arrow path (Java)                                     ║        ║
 ║  Type    ║ Ingest ms │ Load ms  │ Val ms   │ Peak Off-Heap  │  Result       ║ Ingest ms │ Load ms  │ Val ms   │ Peak Off-Heap  │  Result       ║Speedup ║
 ╠══════════╬══════════════════════════════════════════════════════════════════╬══════════════════════════════════════════════════════════════════════╬════════╣
-║  Type A   ║    17,579 │      728 │       83 │    121,587,294 │ ✓ PASS        ║    11,689 │       72 │    3,260 │    797,554,824 │ ✓ PASS        ║  1.22x ║
-║  Type B   ║    13,523 │      630 │       84 │    121,541,462 │ ✓ PASS        ║     9,355 │       66 │    3,178 │    797,444,240 │ ✓ PASS        ║  1.13x ║
-║  Type C   ║    59,281 │    1,312 │      330 │    121,511,222 │ ✓ PASS        ║    44,551 │       96 │    6,464 │  1,397,565,328 │ ✓ PASS        ║  1.19x ║
-║  Type D   ║        90 │       16 │        8 │      1,787,592 │ ✓ PASS        ║         8 │        1 │        2 │      1,852,672 │ ✓ PASS        ║ 10.36x ║
-║  Type E   ║        29 │       19 │       12 │      1,787,592 │ ✗ 3 err       ║         8 │        1 │        2 │      1,852,672 │ ✗ 3 err       ║  5.45x ║
-║  Type F   ║    61,188 │    1,296 │      134 │    121,904,534 │ ✓ PASS        ║    48,578 │      136 │    6,414 │  1,564,876,240 │ ✓ PASS        ║  1.14x ║
-║  Type G   ║   122,073 │    1,982 │      242 │    121,970,078 │ ✓ PASS        ║    96,639 │      388 │   12,631 │  3,117,643,784 │ ✓ PASS        ║  1.13x ║
-║  Type H   ║       146 │       19 │        9 │      2,113,536 │ ✓ PASS        ║        53 │        1 │        7 │      3,133,696 │ ✓ PASS        ║  2.85x ║
-║  Type I   ║        80 │       17 │        7 │      2,113,536 │ ✓ PASS        ║        53 │        0 │        6 │      3,131,648 │ ✓ PASS        ║  1.76x ║
-║  Type J   ║        24 │       15 │        7 │      1,787,592 │ ✓ PASS        ║         2 │        0 │        0 │      1,787,648 │ ✓ PASS        ║ 23.00x ║
+║  Type A   ║    17,056 │      593 │       74 │    121,542,390 │ ✓ PASS        ║     8,491 │       56 │    2,896 │    797,554,824 │ ✓ PASS        ║  1.55x ║
+║  Type B   ║    12,897 │      705 │       85 │    121,542,390 │ ✓ PASS        ║     9,657 │       53 │    2,899 │    797,444,240 │ ✓ PASS        ║  1.09x ║
+║  Type C   ║    30,195 │    1,340 │      355 │    121,511,222 │ ✓ PASS        ║    15,906 │      440 │    5,874 │  1,397,565,328 │ ✓ PASS        ║  1.44x ║
+║  Type D   ║        65 │       16 │       10 │      1,787,592 │ ✓ PASS        ║         4 │        0 │        1 │      1,852,672 │ ✓ PASS        ║ 18.20x ║
+║  Type E   ║        27 │       16 │        8 │      1,787,592 │ ✗ 3 err       ║         4 │        1 │        2 │      1,852,672 │ ✗ 3 err       ║  7.29x ║
+║  Type F   ║    29,021 │    1,318 │      138 │    121,904,574 │ ✓ PASS        ║    17,010 │      679 │    5,982 │  1,564,876,240 │ ✓ PASS        ║  1.29x ║
+║  Type G   ║    59,818 │    2,065 │      265 │    121,904,166 │ ✓ PASS        ║    33,620 │      240 │   11,574 │  3,117,643,784 │ ✓ PASS        ║  1.37x ║
+║  Type H   ║        95 │       24 │        9 │      2,113,536 │ ✓ PASS        ║        27 │        1 │        6 │      3,133,696 │ ✓ PASS        ║  3.76x ║
+║  Type I   ║        60 │       17 │        8 │      2,113,536 │ ✓ PASS        ║        28 │        2 │        8 │      3,131,648 │ ✓ PASS        ║  2.24x ║
+║  Type J   ║        34 │       16 │        7 │      1,787,592 │ ✓ PASS        ║        12 │        1 │        0 │      1,787,648 │ ✓ PASS        ║  4.38x ║
 ╚══════════╩══════════════════════════════════════════════════════════════════╩══════════════════════════════════════════════════════════════════════╩════════╝
 
-  ► Total DuckDB  path: 280,963 ms for 9,004,401 transaction rows
-  ► Total Arrow   path: 243,661 ms for 9,004,401 transaction rows
-  ► Overall speedup: 1.15x (Arrow vs DuckDB end-to-end)
+  ► Total DuckDB  path: 156,337 ms for 9,004,401 transaction rows
+  ► Total Arrow   path: 115,474 ms for 9,004,401 transaction rows
+  ► Overall speedup: 1.35x (Arrow vs DuckDB end-to-end)
 ```
 
 **Key observations:**
 - **Same `ValidationPipeline.standard()`** runs unchanged on both backends (polymorphism through `PaymentRepository` interface).
 - **Validation results are identical**: both pipelines agree on every pass/fail decision (Type E: 3 CtrlSum errors each).
-- **Ingest is faster** with pure Arrow (no DuckDB INSERT round-trip): 1.1–6.5× faster.
-- **Validation is slower** in pure Arrow (iterating Arrow vectors in Java vs DuckDB's compiled SQL): ~15–50× slower for large types.
+- **Ingest is faster** with pure Arrow (no DuckDB INSERT round-trip): 1.1–18× faster.
+- **Validation is slower** in pure Arrow (iterating Arrow vectors in Java vs DuckDB's compiled SQL): ~30–50× slower for large types.
 - **Load is faster** in pure Arrow: zero-copy via `TransferPair` is faster than Arrow C Data Interface round-trip through DuckDB.
 - **Peak off-heap is much larger** in pure Arrow: Arrow allocator holds ALL batches in memory simultaneously (~760 MB for 1M tx), whereas DuckDB holds data in its own managed memory and the Arrow allocator stays bounded at ~120 MB for the C Data Interface transfer.
-- **End-to-end speed**: pure Arrow is ~1.15× faster overall (ingest savings outweigh validation overhead for files dominated by ingest time).
+- **End-to-end speed**: pure Arrow is ~1.35× faster overall (ingest savings outweigh validation overhead for files dominated by ingest time).
 
 **When to choose each validator backend:**
 - **DuckDB validator** (`pgw-validator`) → when memory is constrained (needs only ~120 MB Arrow off-heap vs ~760 MB+), or when OLAP-scale SQL validation logic is complex (window functions, joins across tables, regex).
@@ -250,7 +332,7 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
   PureArrowStreamingPipelineTest    :  3 tests — PASS
   PureArrowMemoryLeakVerificationTest: 2 tests — PASS  (100 iterations, 0 bytes leaked)
   PureArrowIngestionBenchmarkTest   :  1 test  — PASS  (Types A–J, peak 463 MB–1.8 GB off-heap)
-  PipelineComparisonBenchmarkTest   :  1 test  — PASS  (DuckDB vs Pure Arrow A–J, 1.4–6.5× speedup)
+  PipelineComparisonBenchmarkTest   :  1 test  — PASS  (DuckDB vs Pure Arrow A–J, 1.25–6.5× speedup)
   ─────────────────────────────────────────────
   Subtotal                          : 12 tests — BUILD SUCCESS
 
@@ -258,8 +340,8 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
   pgw-validator
 ══════════════════════════════════════════════════════════════
   ValidationTest             :  2 tests — PASS  (Type D passes, Type E fails correctly)
-  ArrowFileLoadBenchmarkTest :  1 test  — PASS
-  ValidationBenchmarkTest    :  1 test  — PASS
+  ArrowFileLoadBenchmarkTest :  1 test  — PASS  (Types A–J, all pass)
+  ValidationBenchmarkTest    :  1 test  — PASS  (Types A–J, all pass)
   ─────────────────────────────────────────────
   Subtotal                   :  4 tests — BUILD SUCCESS
 
@@ -268,7 +350,7 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
 ══════════════════════════════════════════════════════════════
   ArrowValidationTest              :  4 tests — PASS  (D passes, E fails, H & J pass)
   ArrowValidationBenchmarkTest     :  1 test  — PASS  (Types A–J, peak 1.8 MB–3.1 GB off-heap)
-  ValidatorComparisonBenchmarkTest :  1 test  — PASS  (DuckDB SQL vs Arrow Java, 1.1–23× speedup)
+  ValidatorComparisonBenchmarkTest :  1 test  — PASS  (DuckDB SQL vs Arrow Java, 1.09–18.2× speedup)
   ─────────────────────────────────────────────
   Subtotal                         :  6 tests — BUILD SUCCESS
 
@@ -277,4 +359,4 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx4g`):
 ══════════════════════════════════════════════════════════════
 ```
 
-**All 36 tests pass. Benchmark data above is from actual test runs on 2026-04-10 (Java 25 Temurin 25.0.2, -Xmx4g).**
+**All 36 tests pass. Benchmark data above is from actual test runs on 2026-04-11 (Java 25 Temurin 25.0.2, -Xmx8g).**

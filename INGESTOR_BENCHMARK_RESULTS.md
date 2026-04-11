@@ -170,7 +170,7 @@ pgw-ingestor-pure-arrow  :  12 tests — BUILD SUCCESS
 
 **Path:** XML → StAX streaming parse → `PureArrowBatchConsumer` → `ArrowStreamWriter` → `.arrow` files
 
-Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
 ╔════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -178,16 +178,16 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 ╠══════════╦═══════════╦══════════════╦════════════════╦═══════════╦═════════╦══════════╣
 ║  Type    ║  XML (MB) ║  Parse (ms)  ║ Peak Off-Heap  ║  Tx Rows  ║ MB/sec  ║Arrow(MB) ║
 ╠══════════╬═══════════╬══════════════╬════════════════╬═══════════╬═════════╬══════════╣
-║  Type A  ║    734.4  ║      12,289  ║      463.0 MB  ║ 1,000,000 ║    59.8 ║   294.6  ║
-║  Type B  ║    734.3  ║      11,115  ║      463.0 MB  ║ 1,000,000 ║    66.1 ║   294.5  ║
-║  Type C  ║  1,295.1  ║      16,390  ║      791.3 MB  ║ 1,000,000 ║    79.0 ║   494.9  ║
-║  Type D  ║      0.1  ║           6  ║        1.7 MB  ║       200 ║    24.6 ║     0.1  ║
-║  Type E  ║      0.1  ║           6  ║        1.7 MB  ║       200 ║    24.6 ║     0.1  ║
-║  Type F  ║  1,469.8  ║      17,586  ║      896.1 MB  ║ 2,000,000 ║    83.6 ║   590.3  ║
-║  Type G  ║  2,940.7  ║      35,273  ║    1,791.2 MB  ║ 4,000,000 ║    83.4 ║ 1,181.7  ║
-║  Type H  ║      1.5  ║          19  ║        2.0 MB  ║     2,000 ║    77.3 ║     0.6  ║
-║  Type I  ║      1.5  ║          20  ║        2.0 MB  ║     2,000 ║    73.3 ║     0.6  ║
-║  Type J  ║      0.0  ║           2  ║        1.7 MB  ║         1 ║     0.8 ║     0.0  ║
+║  Type A  ║    734.4  ║      12,799  ║      463.0 MB ║ 1,000,000 ║    57.4 ║   294.6 ║
+║  Type B  ║    734.3  ║      11,172  ║      463.0 MB ║ 1,000,000 ║    65.7 ║   294.5 ║
+║  Type C  ║  1,295.1  ║      18,219  ║      791.3 MB ║ 1,000,000 ║    71.1 ║   494.9 ║
+║  Type D  ║      0.1  ║           6  ║        1.7 MB ║       200 ║    24.6 ║     0.1 ║
+║  Type E  ║      0.1  ║           5  ║        1.7 MB ║       200 ║    29.5 ║     0.1 ║
+║  Type F  ║  1,469.8  ║      20,363  ║      896.1 MB ║ 2,000,000 ║    72.2 ║   590.3 ║
+║  Type G  ║  2,940.7  ║      41,519  ║    1,791.2 MB ║ 4,000,000 ║    70.8 ║ 1,181.7 ║
+║  Type H  ║      1.5  ║          22  ║        2.0 MB ║     2,000 ║    66.7 ║     0.6 ║
+║  Type I  ║      1.5  ║          22  ║        2.0 MB ║     2,000 ║    66.6 ║     0.6 ║
+║  Type J  ║      0.0  ║           1  ║        1.7 MB ║         1 ║     1.7 ║     0.0 ║
 ╚══════════╩═══════════╩══════════════╩════════════════╩═══════════╩═════════╩══════════╝
 
   XML (MB)        = source XML file size on disk
@@ -206,9 +206,9 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
   - Type G (4M tx): **1,791 MB** (~1.75 GB — 4× allocator limit required)
 - This is fundamentally different from the DuckDB path which stays at ~31 MB regardless of file size
 - Parse speed is faster than DuckDB (see comparison below) because there is no SQL INSERT overhead
-- **Type H** (10 × 200): 19 ms, 2.0 MB peak — multiple remittances, still tiny
-- **Type I** (5 × 400): 20 ms, 2.0 MB peak — same total rows, different grouping
-- **Type J** (1 × 1): 2 ms, 1.7 MB peak — **unitary baseline** (minimum viable payload)
+- **Type H** (10 × 200): 22 ms, 2.0 MB peak — multiple remittances, still tiny
+- **Type I** (5 × 400): 22 ms, 2.0 MB peak — same total rows, different grouping
+- **Type J** (1 × 1): 1 ms, 1.7 MB peak — **unitary baseline** (minimum viable payload)
 
 ## `pgw-ingestor-pure-arrow` — Memory Leak Verification
 
@@ -228,7 +228,7 @@ This benchmark runs both pipelines back-to-back for each type and prints a side-
 **DuckDB pipeline total** = Parse+Insert ms + Export ms
 **Pure-Arrow pipeline total** = Parse+Write ms (single step, no SQL engine)
 
-Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
 ╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -236,16 +236,16 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 ╠══════════╦══════════╦══════════════╦═══════════╦═══════════════╦══════════════╦═══════════════╦═══════════╦══════════════════╣
 ║  Type    ║ XML (MB) ║ DuckDB Prs+I ║ DuckDB Ex ║ DuckDB Peak   ║ PureArrow ms ║ PureArrow Pk  ║  Tx Rows  ║   Speedup (×)    ║
 ╠══════════╬══════════╬══════════════╬═══════════╬═══════════════╬══════════════╬═══════════════╬═══════════╬══════════════════╣
-║  Type A  ║   734.4  ║       15,758 ║       987 ║      29.9 MB  ║      12,289  ║     463.0 MB  ║ 1,000,000 ║        1.35×     ║
-║  Type B  ║   734.3  ║       14,317 ║       788 ║      29.9 MB  ║      11,115  ║     463.0 MB  ║ 1,000,000 ║        1.36×     ║
-║  Type C  ║ 1,295.1  ║       31,058 ║     1,110 ║      49.7 MB  ║      16,390  ║     791.3 MB  ║ 1,000,000 ║        1.96×     ║
-║  Type D  ║     0.1  ║           16 ║         5 ║       1.7 MB  ║           6  ║       1.7 MB  ║       200 ║        3.50×     ║
-║  Type E  ║     0.1  ║           12 ║         5 ║       1.7 MB  ║           6  ║       1.7 MB  ║       200 ║        2.83×     ║
-║  Type F  ║ 1,469.8  ║       29,716 ║     1,799 ║      29.9 MB  ║      17,586  ║     896.1 MB  ║ 2,000,000 ║        1.79×     ║
-║  Type G  ║ 2,940.7  ║       61,294 ║     4,498 ║      29.9 MB  ║      35,273  ║   1,791.2 MB  ║ 4,000,000 ║        1.86×     ║
-║  Type H  ║     1.5  ║           30 ║         7 ║       2.0 MB  ║          19  ║       2.0 MB  ║     2,000 ║        1.95×     ║
-║  Type I  ║     1.5  ║           29 ║         6 ║       2.0 MB  ║          20  ║       2.0 MB  ║     2,000 ║        1.75×     ║
-║  Type J  ║     0.0  ║            9 ║         4 ║       1.7 MB  ║           2  ║       1.7 MB  ║         1 ║        6.50×     ║
+║  Type A  ║   734.4  ║       17,109 ║      633  ║       29.9 MB ║      11,734  ║      463.0 MB ║ 1,000,000 ║       1.51×     ║
+║  Type B  ║   734.3  ║       12,886 ║      613  ║       29.9 MB ║       9,333  ║      463.0 MB ║ 1,000,000 ║       1.45×     ║
+║  Type C  ║ 1,295.1  ║       56,962 ║    1,010  ║       49.7 MB ║      43,961  ║      791.3 MB ║ 1,000,000 ║       1.32×     ║
+║  Type D  ║     0.1  ║           14 ║        5  ║        1.7 MB ║           7  ║        1.7 MB ║       200 ║       2.71×     ║
+║  Type E  ║     0.1  ║           13 ║        5  ║        1.7 MB ║           8  ║        1.7 MB ║       200 ║       2.25×     ║
+║  Type F  ║ 1,469.8  ║       58,787 ║    1,176  ║       29.9 MB ║      47,995  ║      896.1 MB ║ 2,000,000 ║       1.25×     ║
+║  Type G  ║ 2,940.7  ║      118,085 ║    2,439  ║       29.9 MB ║      96,492  ║    1,791.2 MB ║ 4,000,000 ║       1.25×     ║
+║  Type H  ║     1.5  ║           62 ║        7  ║        2.0 MB ║          51  ║        2.0 MB ║     2,000 ║       1.35×     ║
+║  Type I  ║     1.5  ║           59 ║        7  ║        2.0 MB ║          52  ║        2.0 MB ║     2,000 ║       1.27×     ║
+║  Type J  ║     0.0  ║            8 ║        5  ║        1.7 MB ║           2  ║        1.7 MB ║         1 ║       6.50×     ║
 ╚══════════╩══════════╩══════════════╩═══════════╩═══════════════╩══════════════╩═══════════════╩═══════════╩══════════════════╝
 
   DuckDB Prs+I   = StAX streaming parse + StreamingBatchConsumer INSERT into DuckDB (ms)
@@ -261,10 +261,10 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 | Dimension | DuckDB Pipeline | Pure-Arrow Pipeline |
 |-----------|----------------|---------------------|
-| **Parse speed** (A/B, 1M rows) | ~16,000 ms total | ~11,700 ms (**1.4×** faster) |
-| **Parse speed** (C, 1M×1 rows) | ~32,168 ms total | ~16,390 ms (**2×** faster) |
-| **Parse speed** (F, 2M rows) | ~31,515 ms total | ~17,586 ms (**1.8×** faster) |
-| **Parse speed** (G, 4M rows) | ~65,792 ms total | ~35,273 ms (**1.9×** faster) |
+| **Parse speed** (A/B, 1M rows) | ~17,742 ms total | ~11,734 ms (**1.5×** faster) |
+| **Parse speed** (C, 1M×1 rows) | ~57,972 ms total | ~43,961 ms (**1.3×** faster) |
+| **Parse speed** (F, 2M rows) | ~59,963 ms total | ~47,995 ms (**1.25×** faster) |
+| **Parse speed** (G, 4M rows) | ~120,524 ms total | ~96,492 ms (**1.25×** faster) |
 | **Peak off-heap** (A, 1M rows) | **~30 MB** (bounded — 1 batch) | **~463 MB** (all batches in store) |
 | **Peak off-heap** (F, 2M rows) | **~30 MB** (bounded) | **~896 MB** |
 | **Peak off-heap** (G, 4M rows) | **~30 MB** (bounded) | **~1,791 MB** |

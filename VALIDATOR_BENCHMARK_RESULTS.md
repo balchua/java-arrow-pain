@@ -47,31 +47,6 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 pgw-validator :   4 tests — BUILD SUCCESS
 ```
 
-## `pgw-validator` — Arrow File → DuckDB Load Benchmark (`ArrowFileLoadBenchmarkTest`)
-
-Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2:
-
-```
-╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
-║           Arrow File -> DuckDB Load Benchmark - All Types (Downstream Consumer Simulation)                                   ║
-╠══════════╦═══════════╦═══════════╦════════════╦═══════════╦════════════╦════════════════╦══════════════╦═════════════╣
-║  Type    ║  Msg KB   ║  Rmt KB   ║  Tx KB     ║ Total KB  ║ Load (ms)  ║ Peak Off-Heap  ║  Rows/sec    ║  Tx Rows    ║
-╠══════════╬═══════════╬═══════════╬════════════╬═══════════╬════════════╬════════════════╬══════════════╬═════════════╣
-║  Type A   ║         0 ║         2 ║    301,709 ║   301,712 ║        594 ║    121,576,862 ║    1,683,503 ║   1,000,000 ║
-║  Type B   ║         0 ║         2 ║    301,600 ║   301,604 ║        599 ║    121,552,894 ║    1,669,452 ║   1,000,000 ║
-║  Type C   ║         0 ║   205,125 ║    301,654 ║   506,780 ║      1,249 ║    121,511,222 ║    1,601,281 ║   1,000,000 ║
-║  Type D   ║         0 ║         2 ║         61 ║        65 ║         14 ║         70,486 ║       14,428 ║         200 ║
-║  Type E   ║         0 ║         2 ║         61 ║        65 ║         16 ║         70,486 ║       12,625 ║         200 ║
-║  Type F   ║         0 ║         2 ║    604,501 ║   604,504 ║      1,263 ║    121,576,862 ║    1,583,532 ║   2,000,000 ║
-║  Type G   ║         0 ║         2 ║  1,210,086 ║ 1,210,090 ║      1,982 ║    141,889,390 ║    2,018,163 ║   4,000,000 ║
-║  Type H   ║         0 ║         4 ║        598 ║       604 ║         19 ║      1,053,750 ║      105,789 ║       2,000 ║
-║  Type I   ║         0 ║         3 ║        599 ║       603 ║         15 ║      1,053,750 ║      133,666 ║       2,000 ║
-║  Type J   ║         0 ║         2 ║          2 ║         5 ║         17 ║          5,944 ║          117 ║           1 ║
-╚══════════╩═══════════╩═══════════╩════════════╩═══════════╩════════════╩════════════════╩══════════════╩═════════════╝
-
-  Peak Off-Heap = Arrow allocator off-heap bytes after loading all 3 tables into DuckDB
-```
-
 ## `pgw-validator` — DuckDB Load + SQL Validation Benchmark (`ValidationBenchmarkTest`)
 
 Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2):

@@ -34,34 +34,67 @@ directly without any intermediate SQL layer.
 
 ```
 pain001-arrow-loader/               ← parent POM (com.pgw:pain001-arrow-loader)
-├── pgw-common/                     ← shared infrastructure (Arrow schema, parser, generator, benchmark)
 ├── pgw-domain/                     ← pure-Java domain layer (VOs, exceptions, models)
-├── pgw-ingestor/                   ← XML → Arrow → DuckDB pipeline (no domain)
-├── pgw-ingestor-pure-arrow/        ← XML → Arrow IPC only (no DuckDB at ingest time)
-├── pgw-validator/                  ← all domain services + DuckDB-backed validation + App
-└── pgw-validator-pure-arrow/       ← pure-Arrow validation (same PaymentRepository, no DuckDB)
+├── pgw-common/                     ← shared infrastructure (Arrow schema, parser, generator,
+│                                   │   benchmark, PaymentRepository interface, ValidationPipeline)
+├── pgw-duckdb-helper/              ← shared DuckDB + Arrow C-Data utilities (ArrowIpc, DuckDbFactory,
+│                                   │   StreamingBatchConsumer) — no domain
+├── pgw-ingestor/                   ← XML → DuckDB → Arrow IPC pipeline (depends on pgw-duckdb-helper)
+├── pgw-ingestor-pure-arrow/        ← XML → Arrow IPC only, no DuckDB (depends on pgw-common)
+├── pgw-validator/                  ← DuckDB-backed PaymentRepositoryImpl + App (depends on pgw-duckdb-helper)
+└── pgw-validator-pure-arrow/       ← pure-Arrow validation, no DuckDB (depends on pgw-common + pgw-domain)
 ```
 
-**Build order:** `pgw-common` → `pgw-domain` → `pgw-ingestor` → `pgw-ingestor-pure-arrow` → `pgw-validator` → `pgw-validator-pure-arrow`
+**Dependency graph:**
+```
+pgw-domain
+    ↑
+pgw-common  ←─────────────────────────┐
+    ↑                                 │
+pgw-duckdb-helper               pgw-ingestor-pure-arrow
+    ↑              ↑
+pgw-ingestor    pgw-validator         pgw-validator-pure-arrow
+```
 
-### `pgw-common` — Shared Arrow Infrastructure
+### `pgw-common` — Shared Infrastructure + Validation Stack
 
-Holds all infrastructure shared by more than one module: Arrow schema definition, StAX parser
-interfaces and implementation, XML generator, and benchmark utility. No DuckDB dependency.
+Holds all infrastructure shared by more than one module: Arrow schema, StAX parser, XML generator,
+benchmark utility, the `PaymentRepository` interface, the chainable `ValidationPipeline`, all
+SQL-based validators, and the pure-Java domain service validators. Depends on `pgw-domain`.
 
 ```
 pgw-common/src/main/java/com/pgw/
-├── arrow/Pain001ArrowSchema.java   # Arrow schema definitions for all 3 tables
-├── benchmark/LoadBenchmark.java    # Timing, memory tracking, formatted report
+├── arrow/Pain001ArrowSchema.java         # Arrow schema definitions for all 3 tables
+├── benchmark/LoadBenchmark.java          # Timing, memory tracking, formatted report
+├── dal/PaymentRepository.java            # Interface: streaming access to message/remittance/transaction
+├── domain/service/                       # Pure-Java domain validators (Iban, Bic, Amount, ControlSum)
+│   ├── MessageDomainValidator.java
+│   ├── RemittanceDomainValidator.java
+│   ├── TransactionDomainValidator.java
+│   └── ControlSumDomainService.java
 ├── generator/
-│   ├── PainFileSpec.java           # Data record: file spec (name, counts, flags)
-│   ├── PainXmlGenerator.java       # Interface: generate(PainFileSpec, Path)
-│   └── PainXmlGeneratorImpl.java   # StAX XML generator implementation
-└── parser/
-    ├── BatchConsumer.java          # @FunctionalInterface: per-batch callback
-    ├── PainParser.java             # Interface: parseStreaming()
-    ├── PainParserImpl.java         # StAX impl — streaming path clears RAM per batch
-    └── ParseStats.java             # Lightweight result: (msgRows, rmtRows, txRows)
+│   ├── PainFileSpec.java                 # Data record: file spec (name, counts, flags)
+│   ├── PainXmlGenerator.java             # Interface: generate(PainFileSpec, Path)
+│   └── PainXmlGeneratorImpl.java         # StAX XML generator implementation
+├── parser/
+│   ├── BatchConsumer.java                # @FunctionalInterface: per-batch callback
+│   ├── PainParser.java                   # Interface: parseStreaming()
+│   ├── PainParserImpl.java               # StAX impl — streaming path clears RAM per batch
+│   └── ParseStats.java                   # Lightweight result: (msgRows, rmtRows, txRows)
+└── validation/
+    ├── Validator.java                    # Interface: validate(PaymentRepository, ValidationContext)
+    ├── ValidationContext.java            # Thread-safe error/warning collection
+    ├── ValidationPipeline.java           # Fluent builder with virtual thread support
+    ├── ExecutionMode.java                # SEQUENTIAL, PARALLEL, AUTO
+    ├── ChainedValidator.java             # andThen() implementation
+    ├── VirtualThreadValidator.java       # Abstract base for virtual thread execution
+    └── validators/                       # Validators (SQL via PaymentRepository + domain service)
+        ├── MessageValidator.java
+        ├── RemittanceValidator.java
+        ├── TransactionValidator.java
+        ├── ControlSumValidator.java
+        ├── ParallelTransactionValidator.java
+        └── StreamingTransactionIteratorValidator.java
 ```
 
 ### `pgw-domain` — Pure-Java Domain Layer
@@ -76,18 +109,25 @@ pgw-domain/src/main/java/com/pgw/
     └── valueobject/                # VOs with enforced invariants (Iban, Bic, Amount, Currency, ControlSum)
 ```
 
-### `pgw-ingestor` — DuckDB Ingest Pipeline
+### `pgw-duckdb-helper` — Shared DuckDB + Arrow Utilities
 
-Owns the DuckDB ingest concern: StAX XML parsing → Arrow batch consumer → DuckDB live INSERT →
-`ArrowIpc.export()` via C Data Interface. No domain objects. Depends on `pgw-common`.
+Holds all shared DuckDB/Arrow glue code. Both `pgw-ingestor` and `pgw-validator` depend on this
+module. No domain dependency. Eliminates the previous `pgw-validator` → `pgw-ingestor` coupling.
 
 ```
-pgw-ingestor/src/main/java/com/pgw/
+pgw-duckdb-helper/src/main/java/com/pgw/
 ├── ArrowIpc.java                   # Extension-less Arrow export + load (C Data Interface)
 ├── DuckDbFactory.java              # Opens a plain DuckDB connection
 └── parser/
     └── StreamingBatchConsumer.java # Single DuckDB sink: Arrow C Data Interface INSERT
 ```
+
+### `pgw-ingestor` — DuckDB Ingest Pipeline
+
+Owns the DuckDB ingest concern: StAX XML parsing → Arrow batch consumer → DuckDB live INSERT →
+`ArrowIpc.export()` via C Data Interface. No domain objects. Depends on `pgw-common` and
+`pgw-duckdb-helper`. Has no main-source Java files of its own — all infrastructure classes live
+in `pgw-duckdb-helper`.
 
 ### `pgw-ingestor-pure-arrow` — Pure-Arrow Ingest Pipeline (no DuckDB)
 
@@ -97,90 +137,23 @@ different consumer — no SQL engine involved.
 
 ```
 pgw-ingestor-pure-arrow/src/main/java/com/pgw/purearrow/
-├── PureArrowBatchConsumer.java     # BatchConsumer: VectorUnloader → store + ArrowStreamWriter
+├── PureArrowBatchConsumer.java     # BatchConsumer: Arrow TransferPair → store + ArrowStreamWriter
 ├── PureArrowInMemoryStore.java     # Holds ArrowRecordBatch lists per table; AutoCloseable
 ├── PureArrowIngestResult.java      # Record: ParseStats + store + 3 file paths
 └── PureArrowIngestor.java          # Orchestrates parse → consumer → result
 ```
 
-```
-pgw-validator/src/main/java/com/pgw/
-├── App.java                              # Entry point — requires an existing pain.001 XML file path
-├── dal/
-│   ├── PaymentRepository.java            # Interface: streaming SQL access to message/remittance/transaction
-│   └── PaymentRepositoryImpl.java        # DuckDB implementation (zero-copy Arrow C Data Interface)
-├── domain/
-│   ├── model/                            # Read-model DTOs hydrated from DuckDB by the DAL
-│   │   ├── Message.java                  # GroupHeader — messageId, creationDateTime, controlSum, initiatingParty
-│   │   ├── Remittance.java               # PaymentInformation — remittanceId, debtor, executionDate, controlSum
-│   │   ├── Transaction.java              # CreditTransferTransaction — amounts, currency, creditor info
-│   │   └── PaymentMethod.java            # Enum: TRF, CHK
-│   ├── exception/                        # Typed validation exceptions
-│   │   ├── InvalidIbanException.java
-│   │   ├── InvalidBicException.java
-│   │   ├── InvalidAmountException.java
-│   │   ├── InvalidCurrencyException.java
-│   │   └── InvalidControlSumException.java
-│   ├── valueobject/                      # VOs with enforced invariants
-│   │   ├── Iban.java                     # MOD-97 checksum (ISO 13616-1)
-│   │   ├── Bic.java                      # SWIFT regex ^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$
-│   │   ├── Amount.java                   # value > 0; carries Currency; add() guards same-currency
-│   │   ├── Currency.java                 # ISO 4217 [A-Z]{3}
-│   │   └── ControlSum.java               # value ≥ 0; scaled to 2dp; epsilon-safe matches()
-│   └── service/                          # Pure-Java domain validators
-│       ├── MessageDomainValidator.java   # messageId ≤ 35, initiatingParty non-blank, CreDtTm ISO 8601
-│       ├── RemittanceDomainValidator.java # debtor Iban MOD-97, debtor Bic SWIFT, executionDate non-null
-│       ├── TransactionDomainValidator.java # Amount+Currency VOs, creditor Iban+Bic, creditor name non-blank
-│       └── ControlSumDomainService.java  # streaming arithmetic: rmt-level + msg-level ControlSum.matches()
-└── validation/
-    ├── Validator.java                    # Interface: validate(PaymentRepository, ValidationContext)
-    ├── ValidationContext.java            # Thread-safe error/warning collection
-    ├── ValidationPipeline.java           # Fluent builder with virtual thread support
-    ├── ExecutionMode.java                # SEQUENTIAL, PARALLEL, AUTO
-    ├── ChainedValidator.java             # andThen() implementation
-    ├── VirtualThreadValidator.java       # Abstract base for virtual thread execution
-    └── validators/                       # SQL-based validators (via PaymentRepository)
-        ├── MessageValidator.java
-        ├── RemittanceValidator.java
-        ├── TransactionValidator.java
-        ├── ControlSumValidator.java
-        └── ParallelTransactionValidator.java
-```
+### `pgw-validator` — DuckDB-Backed Repository + Application
 
-### `pgw-validator` — Full Domain Services + DAL + Validation + Application
-
-Owns **all domain service concerns**: domain validators, the DuckDB-backed repository (DAL), the
-chainable SQL validation pipeline, and the `App` entry point. Depends on `pgw-common`, `pgw-domain`,
-and `pgw-ingestor`.
+Provides the DuckDB implementation of `PaymentRepository` (`PaymentRepositoryImpl`) and the
+`App` entry point. Domain model, validation pipeline, and validators all live in `pgw-common`.
+Depends on `pgw-common`, `pgw-domain`, and `pgw-duckdb-helper`.
 
 ```
 pgw-validator/src/main/java/com/pgw/
 ├── App.java                              # Entry point — requires an existing pain.001 XML file path
-├── dal/
-│   ├── PaymentRepository.java            # Interface: streaming SQL access to message/remittance/transaction
-│   └── PaymentRepositoryImpl.java        # DuckDB implementation (zero-copy Arrow C Data Interface)
-├── domain/
-│   ├── model/                            # (copies also in pgw-domain) DTOs hydrated from DuckDB by the DAL
-│   ├── exception/                        # (copies also in pgw-domain) Typed validation exceptions
-│   ├── valueobject/                      # (copies also in pgw-domain) VOs with enforced invariants
-│   └── service/                          # Domain validators (depend on Validator/PaymentRepository)
-│       ├── MessageDomainValidator.java   # messageId ≤ 35, initiatingParty non-blank, CreDtTm ISO 8601
-│       ├── RemittanceDomainValidator.java
-│       ├── TransactionDomainValidator.java
-│       └── ControlSumDomainService.java  # streaming arithmetic: rmt-level + msg-level ControlSum.matches()
-└── validation/
-    ├── Validator.java                    # Interface: validate(PaymentRepository, ValidationContext)
-    ├── ValidationContext.java            # Thread-safe error/warning collection
-    ├── ValidationPipeline.java           # Fluent builder with virtual thread support
-    ├── ExecutionMode.java                # SEQUENTIAL, PARALLEL, AUTO
-    ├── ChainedValidator.java             # andThen() implementation
-    ├── VirtualThreadValidator.java       # Abstract base for virtual thread execution
-    └── validators/                       # SQL-based validators (via PaymentRepository)
-        ├── MessageValidator.java
-        ├── RemittanceValidator.java
-        ├── TransactionValidator.java
-        ├── ControlSumValidator.java
-        └── ParallelTransactionValidator.java
+└── dal/
+    └── PaymentRepositoryImpl.java        # DuckDB implementation (zero-copy Arrow C Data Interface)
 ```
 
 ### `pgw-validator-pure-arrow` — Pure-Arrow Validation (no DuckDB)
@@ -188,25 +161,21 @@ pgw-validator/src/main/java/com/pgw/
 Implements the **same `PaymentRepository` interface** as `pgw-validator`, but reads data directly
 from Arrow IPC stream files via `ArrowStreamReader` — no DuckDB, no JDBC, no SQL. All validation
 logic (IBAN regex, amount checks, control sum aggregation) is pure Java scanning Arrow vectors.
+Depends on `pgw-common` and `pgw-domain`.
 
 **Modular DAL design** (each class has a single clear responsibility):
 
 ```
 pgw-validator-pure-arrow/src/main/java/com/pgw/purearrow/validator/dal/
 ├── ArrowTableLoader.java           # Utility: reads Arrow IPC stream file → List<VectorSchemaRoot>
-│                                   #   Uses ArrowStreamReader + VectorUnloader/VectorLoader
-│                                   #   to materialise independent batch copies
+│                                   #   Uses FieldVector.makeTransferPair(dst).transfer()
+│                                   #   for zero-copy buffer ownership transfer (no duplicate)
 ├── ArrowMessageTable.java          # message table: typed column access + row iteration
 ├── ArrowRemittanceTable.java       # remittance table: typed column access + row iteration
 │                                   #   (supports forEachByMsgId for filtered streaming)
 ├── ArrowTransactionTable.java      # transactions table: typed column access + row iteration
 │                                   #   (supports forEachByPmtInfId for filtered streaming)
 ├── ArrowPaymentRepositoryImpl.java # Implements PaymentRepository using the 3 table classes
-│                                   #   validateMessageFields()  — length checks, null checks
-│                                   #   validateRemittanceFields() — IBAN regex, payment method
-│                                   #   validateTransactionFields() — amount > 0, creditor name
-│                                   #   validateControlSums()    — BigDecimal aggregation, abs diff
-│                                   #   streamAllTransactions()  — iterate Arrow vectors directly
 └── ArrowPaymentRepositoryLoader.java # Factory: load(msgFile, rmtFile, txFile, allocator)
 ```
 
@@ -220,13 +189,11 @@ pgw-validator-pure-arrow/src/main/java/com/pgw/purearrow/validator/dal/
 | `PureArrowStreamingPipelineTest` | `pgw-ingestor-pure-arrow` | Memory footprint, row counts, IPC round-trip |
 | `PureArrowMemoryLeakVerificationTest` | `pgw-ingestor-pure-arrow` | 50-iteration zero-leak test (Types D + E) |
 | `PureArrowIngestionBenchmarkTest` | `pgw-ingestor-pure-arrow` | XML → Arrow IPC benchmark, no DuckDB (Types A–J) |
-| **`PipelineComparisonBenchmarkTest`** | `pgw-ingestor-pure-arrow` | **DuckDB vs Pure Arrow ingest side-by-side comparison (Types A–J)** |
 | `ValidationTest` | `pgw-validator` | Domain validation correctness (DuckDB-backed) |
 | `ArrowFileLoadBenchmarkTest` | `pgw-validator` | Arrow file → DuckDB load time (no validation) |
 | `ValidationBenchmarkTest` | `pgw-validator` | Arrow→DuckDB load time **+ SQL validation time** |
 | `ArrowValidationTest` | `pgw-validator-pure-arrow` | Correctness: Types D, E, H, J (pure-Arrow, no DuckDB) |
 | `ArrowValidationBenchmarkTest` | `pgw-validator-pure-arrow` | Arrow ingest + Arrow load + Java validation benchmark (Types A–J) |
-| **`ValidatorComparisonBenchmarkTest`** | `pgw-validator-pure-arrow` | **DuckDB SQL vs pure-Arrow Java validation side-by-side (Types A–J)** |
 
 ---
 
@@ -389,10 +356,10 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor-pure-arrow \
   -Dtest="PureArrowParsePipelineTest,PureArrowStreamingPipelineTest"
 
-# Pipeline comparison benchmark (DuckDB vs Pure Arrow, Types A–J)
+# Pure-Arrow ingest benchmark (Types A–J, no DuckDB)
 # First run generates large files ~10 min; subsequent runs use cached files
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
-  mvn test -pl pgw-ingestor-pure-arrow -Dtest=PipelineComparisonBenchmarkTest
+  mvn test -pl pgw-ingestor-pure-arrow -Dtest=PureArrowIngestionBenchmarkTest
 
 # Validation-stage benchmark only (Arrow → DuckDB load + SQL validation)
 # Generates Types A–E Arrow files if absent; runs quickly once files exist
@@ -415,20 +382,6 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 ### How to read the benchmark tables
 
 When tests run, benchmark output is printed directly to the console (not redirected to a file):
-
-**PipelineComparisonBenchmarkTest** — DuckDB vs Pure Arrow ingest (side-by-side):
-```
-╔═══════════════════════════════════════════════════════════════════════════════════════════╗
-║     PIPELINE COMPARISON — DuckDB  vs  Pure Arrow  (XML → .arrow files)                   ║
-╠══════════╦══════════╦══════════════╦═══════════╦═════════╦══════════════╦═══════╦════════╣
-║  Type    ║ XML (MB) ║ DuckDB Prs+I ║ DuckDB Ex ║ DuckDB  ║ PureArrow ms ║ Tx    ║Speedup ║
-╠══════════╬══════════╬══════════════╬═══════════╬═════════╬══════════════╬═══════╬════════╣
-║  Type A  ║   734.4  ║       15,843 ║       578 ║ 29.9 MB ║        3,421 ║  1,0M ║  4.80× ║
-...
-╚══════════╩══════════╩══════════════╩═══════════╩═════════╩══════════════╩═══════╩════════╝
-  Speedup (×) = DuckDB total (parse+insert+export) / PureArrow total (parse+write)
-                Values > 1.0× mean pure-Arrow is faster end-to-end
-```
 
 **ArrowFileLoadBenchmarkTest** — Arrow file → DuckDB load (downstream simulation):
 ```
@@ -544,9 +497,7 @@ See [VALIDATOR_BENCHMARK_RESULTS.md](VALIDATOR_BENCHMARK_RESULTS.md) for validat
 - Arrow IPC Stream → DuckDB downstream load times (via `ArrowIpc.load()` — no extension) — all 10 types A–J
 - **DuckDB SQL validation benchmark** — DuckDB load ms + SQL validation ms separated (Types A–J)
 - **Pure-Arrow validation benchmark** — Arrow load ms + Java validation ms separated (Types A–J)
-- **DuckDB SQL vs pure-Arrow Java validation comparison** — same `ValidationPipeline`, different DAL backend
 - Memory leak verification: 50-iteration stress test, 0 bytes leaked
-- Full test suite summary (36 tests passing)
 
 ---
 

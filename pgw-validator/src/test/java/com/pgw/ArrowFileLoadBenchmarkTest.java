@@ -45,7 +45,7 @@ class ArrowFileLoadBenchmarkTest {
     /** Allocator limit for extra-large files (F, G - 2M–4M transactions). */
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024; //   4 GB
 
-    private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
+    private static final Path OUTPUT_DIR = Paths.get("..", "test-data", "output", "validator");
 
     record BenchmarkResult(
             String label,

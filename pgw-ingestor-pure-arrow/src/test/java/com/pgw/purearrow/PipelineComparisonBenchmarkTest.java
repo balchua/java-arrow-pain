@@ -59,8 +59,8 @@ class PipelineComparisonBenchmarkTest {
     private static final long LARGE_ALLOCATOR_LIMIT  = 2L * 1024 * 1024 * 1024L; //  2 GB
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L * 1024 * 1024 * 1024L; //  4 GB
 
-    private static final Path DUCKDB_OUT  = Paths.get("target", "comparison-test-output", "duckdb");
-    private static final Path ARROW_OUT   = Paths.get("target", "comparison-test-output", "pure-arrow");
+    private static final Path DUCKDB_OUT  = Paths.get("..", "test-data", "output", "ingestor-pure-arrow", "comparison", "duckdb");
+    private static final Path ARROW_OUT   = Paths.get("..", "test-data", "output", "ingestor-pure-arrow", "comparison", "pure-arrow");
 
     private static final List<ComparisonResult> RESULTS = new ArrayList<>();
 

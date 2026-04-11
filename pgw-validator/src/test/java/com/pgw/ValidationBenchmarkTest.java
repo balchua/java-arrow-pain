@@ -54,7 +54,7 @@ class ValidationBenchmarkTest {
     private static final long LARGE_ALLOCATOR_LIMIT  = 2L   * 1024 * 1024 * 1024; //   2 GB
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024; //   4 GB
 
-    private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
+    private static final Path OUTPUT_DIR = Paths.get("..", "test-data", "output", "validator");
 
     record ValidationResult(
             String label,

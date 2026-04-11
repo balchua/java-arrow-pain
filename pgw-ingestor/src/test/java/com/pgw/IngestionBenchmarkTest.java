@@ -47,7 +47,7 @@ class IngestionBenchmarkTest {
     private static final long LARGE_ALLOCATOR_LIMIT  = 2L   * 1024 * 1024 * 1024L; //   2 GB
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024L; //   4 GB
 
-    private static final Path OUTPUT_DIR = Paths.get("src", "test", "resources", "output");
+    private static final Path OUTPUT_DIR = Paths.get("..", "test-data", "output", "ingestor");
 
     record IngestionResult(
             String label,

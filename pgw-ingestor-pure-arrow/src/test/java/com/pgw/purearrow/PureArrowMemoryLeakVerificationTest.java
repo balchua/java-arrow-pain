@@ -28,7 +28,7 @@ class PureArrowMemoryLeakVerificationTest {
 
     private static final int ITERATIONS = 50;
     private static final long ALLOCATOR_LIMIT = 512L * 1024 * 1024; // 512 MB
-    private static final Path OUTPUT_DIR = Paths.get("target", "pure-arrow-test-output");
+    private static final Path OUTPUT_DIR = Paths.get("..", "test-data", "output", "ingestor-pure-arrow");
 
     @BeforeAll
     static void createOutputDir() throws Exception {

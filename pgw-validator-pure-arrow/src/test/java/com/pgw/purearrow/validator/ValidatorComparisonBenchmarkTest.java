@@ -66,8 +66,8 @@ class ValidatorComparisonBenchmarkTest {
     private static final long LARGE_ALLOCATOR_LIMIT  = 2L   * 1024 * 1024 * 1024;
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024;
 
-    private static final Path DUCKDB_DIR = Paths.get("target", "validator-comparison", "duckdb");
-    private static final Path ARROW_DIR  = Paths.get("target", "validator-comparison", "pure-arrow");
+    private static final Path DUCKDB_DIR = Paths.get("..", "test-data", "output", "validator-pure-arrow", "comparison", "duckdb");
+    private static final Path ARROW_DIR  = Paths.get("..", "test-data", "output", "validator-pure-arrow", "comparison", "pure-arrow");
 
     private static final List<ComparisonResult> RESULTS = new ArrayList<>();
 

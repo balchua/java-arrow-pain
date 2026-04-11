@@ -54,7 +54,7 @@ class ArrowValidationBenchmarkTest {
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L   * 1024 * 1024 * 1024;
 
     private static final Path OUTPUT_DIR =
-            Paths.get("target", "pure-arrow-validator-output");
+            Paths.get("..", "test-data", "output", "validator-pure-arrow");
 
     record ValidationResult(
             String label,

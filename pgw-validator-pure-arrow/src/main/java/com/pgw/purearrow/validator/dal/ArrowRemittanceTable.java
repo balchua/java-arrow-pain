@@ -16,11 +16,15 @@ import java.util.function.Consumer;
  * In-memory Arrow-backed accessor for the <b>remittance</b> table
  * (one row per ISO 20022 pain.001 PaymentInformation / PmtInf block).
  *
- * <p>Wraps a list of materialised {@link VectorSchemaRoot} batches loaded by
+ * <p>
+ * Wraps a list of materialised {@link VectorSchemaRoot} batches loaded by
  * {@link ArrowTableLoader}. Column values are accessed by name using the field
- * constants from {@link Pain001ArrowSchema}.</p>
+ * constants from {@link Pain001ArrowSchema}.
+ * </p>
  *
- * <p>Call {@link #close()} to release all Arrow off-heap memory.</p>
+ * <p>
+ * Call {@link #close()} to release all Arrow off-heap memory.
+ * </p>
  */
 public final class ArrowRemittanceTable implements AutoCloseable {
 
@@ -65,7 +69,8 @@ public final class ArrowRemittanceTable implements AutoCloseable {
 
     public LocalDate getReqdExctnDt(VectorSchemaRoot batch, int i) {
         DateDayVector v = (DateDayVector) batch.getVector(Pain001ArrowSchema.RMT_REQD_EXCTN_DT);
-        if (v == null || v.isNull(i)) return null;
+        if (v == null || v.isNull(i))
+            return null;
         return LocalDate.ofEpochDay(v.get(i));
     }
 
@@ -168,6 +173,12 @@ public final class ArrowRemittanceTable implements AutoCloseable {
         }
     }
 
+    public void scanProjected(List<String> columns, Consumer<ArrowProjectedBatch> consumer) {
+        for (VectorSchemaRoot batch : batches) {
+            consumer.accept(ArrowProjectedBatch.create(batch, columns));
+        }
+    }
+
     // ── Resource management ───────────────────────────────────────────────────
 
     @Override
@@ -179,13 +190,15 @@ public final class ArrowRemittanceTable implements AutoCloseable {
 
     private static String varchar(VectorSchemaRoot root, String field, int i) {
         VarCharVector v = (VarCharVector) root.getVector(field);
-        if (v == null || v.isNull(i)) return null;
+        if (v == null || v.isNull(i))
+            return null;
         return v.getObject(i).toString();
     }
 
     private static BigDecimal decimal(VectorSchemaRoot root, String field, int i) {
         DecimalVector v = (DecimalVector) root.getVector(field);
-        if (v == null || v.isNull(i)) return null;
+        if (v == null || v.isNull(i))
+            return null;
         return v.getObject(i);
     }
 }

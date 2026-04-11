@@ -12,9 +12,11 @@ import java.util.List;
 /**
  * DuckDB-backed implementation of {@link PaymentRepository}.
  *
- * <p>Wraps a pre-populated {@link DuckDBConnection} whose {@code message},
+ * <p>
+ * Wraps a pre-populated {@link DuckDBConnection} whose {@code message},
  * {@code remittance}, and {@code transactions} tables have already been loaded
- * by the streaming ingestor pipeline.</p>
+ * by the streaming ingestor pipeline.
+ * </p>
  */
 public final class PaymentRepositoryImpl implements PaymentRepository {
 
@@ -170,6 +172,48 @@ public final class PaymentRepositoryImpl implements PaymentRepository {
                     issues.add(new PaymentRepository.Issue(rs.getString(1),
                             "Message CtrlSum mismatch: declared=" + rs.getDouble(2)
                                     + ", actual=" + rs.getDouble(3)));
+                }
+            }
+        }
+
+        return issues;
+    }
+
+    @Override
+    public synchronized List<PaymentRepository.Issue> validateNumberOfTransactions() throws SQLException {
+        List<PaymentRepository.Issue> issues = new ArrayList<>();
+
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT r.pmt_inf_id,"
+                        + " CAST(r.nb_of_txs AS BIGINT) AS declared,"
+                        + " COUNT(t.end_to_end_id) AS actual"
+                        + " FROM remittance r"
+                        + " LEFT JOIN transactions t ON r.pmt_inf_id = t.pmt_inf_id"
+                        + " GROUP BY r.pmt_inf_id, r.nb_of_txs"
+                        + " HAVING CAST(r.nb_of_txs AS BIGINT) <> COUNT(t.end_to_end_id)")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    issues.add(new PaymentRepository.Issue(rs.getString(1),
+                            "Remittance NbOfTxs mismatch: declared=" + rs.getLong(2)
+                                    + ", actual=" + rs.getLong(3)));
+                }
+            }
+        }
+
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT m.msg_id,"
+                        + " CAST(m.msg_nb_of_txs AS BIGINT) AS declared,"
+                        + " COUNT(t.end_to_end_id) AS actual"
+                        + " FROM message m"
+                        + " LEFT JOIN remittance r ON m.msg_id = r.msg_id"
+                        + " LEFT JOIN transactions t ON r.pmt_inf_id = t.pmt_inf_id"
+                        + " GROUP BY m.msg_id, m.msg_nb_of_txs"
+                        + " HAVING CAST(m.msg_nb_of_txs AS BIGINT) <> COUNT(t.end_to_end_id)")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    issues.add(new PaymentRepository.Issue(rs.getString(1),
+                            "Message NbOfTxs mismatch: declared=" + rs.getLong(2)
+                                    + ", actual=" + rs.getLong(3)));
                 }
             }
         }

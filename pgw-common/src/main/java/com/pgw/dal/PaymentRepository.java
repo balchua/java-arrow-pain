@@ -11,31 +11,46 @@ import java.util.function.Consumer;
 
 /**
  * Contract for SQL-based access to the three pain.001 Arrow tables
- * (message, remittance, transactions) loaded into an in-process DuckDB instance.
+ * (message, remittance, transactions) loaded into an in-process DuckDB
+ * instance.
  *
- * <p>Streaming methods ({@code streamMessages}, {@code streamRemittances},
- * {@code streamTransactions}) iterate over rows one at a time via a JDBC cursor
+ * <p>
+ * Streaming methods ({@code streamMessages}, {@code streamRemittances},
+ * {@code streamTransactions}) iterate over rows one at a time like a JDBC
+ * cursor
  * and invoke the supplied {@link Consumer} for each row. At no point is more
  * than one domain object resident in heap, preventing out-of-memory errors when
- * processing files with millions of transactions.</p>
+ * processing files with millions of transactions.
+ * </p>
  */
 public interface PaymentRepository extends AutoCloseable {
 
-    record Issue(String id, String message) {}
+    record Issue(String id, String message) {
+    }
 
     // ── SQL-level bulk validators ────────────────────────────────────────────
 
-    List<Issue> validateMessageFields()    throws SQLException;
-    List<Issue> validateRemittanceFields() throws SQLException;
-    List<Issue> validateTransactionFields() throws SQLException;
-    List<Issue> validateControlSums()       throws SQLException;
+    List<Issue> validateMessageFields() throws SQLException;
 
-    List<String> findInvalidIbans()         throws SQLException;
-    BigDecimal   sumTransactionsByRemittance(String pmtInfId) throws SQLException;
-    String       getMessageSummary()        throws SQLException;
-    long         getRemittanceCount()       throws SQLException;
-    long         getTransactionCount()      throws SQLException;
-    BigDecimal   getTotalTransactionAmount() throws SQLException;
+    List<Issue> validateRemittanceFields() throws SQLException;
+
+    List<Issue> validateTransactionFields() throws SQLException;
+
+    List<Issue> validateControlSums() throws SQLException;
+
+    List<Issue> validateNumberOfTransactions() throws SQLException;
+
+    List<String> findInvalidIbans() throws SQLException;
+
+    BigDecimal sumTransactionsByRemittance(String pmtInfId) throws SQLException;
+
+    String getMessageSummary() throws SQLException;
+
+    long getRemittanceCount() throws SQLException;
+
+    long getTransactionCount() throws SQLException;
+
+    BigDecimal getTotalTransactionAmount() throws SQLException;
 
     // ── Streaming domain-object access ───────────────────────────────────────
 
@@ -73,12 +88,14 @@ public interface PaymentRepository extends AutoCloseable {
      * Streams every {@link Transaction} row in the transactions table,
      * invoking {@code handler} once per row regardless of remittance.
      *
-     * <p>Rows are fetched from DuckDB in batches (fetch size 1,000); the handler
+     * <p>
+     * Rows are fetched from DuckDB in batches (fetch size 1,000); the handler
      * is still invoked once per row so the heap holds at most one
      * {@code Transaction} instance per callback invocation. This is intended for
      * use-cases that must inspect every transaction individually (e.g., calling
      * an external API per record) and want to measure the raw cost of full-table
-     * streaming through DuckDB.</p>
+     * streaming through DuckDB.
+     * </p>
      *
      * @param handler callback invoked for each transaction row
      * @throws SQLException if the underlying query fails

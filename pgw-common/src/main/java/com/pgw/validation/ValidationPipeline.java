@@ -3,6 +3,7 @@ package com.pgw.validation;
 import com.pgw.dal.PaymentRepository;
 import com.pgw.validation.validators.ControlSumValidator;
 import com.pgw.validation.validators.MessageValidator;
+import com.pgw.validation.validators.NumberOfTransactionsValidator;
 import com.pgw.validation.validators.RemittanceValidator;
 import com.pgw.validation.validators.TransactionValidator;
 import org.slf4j.Logger;
@@ -18,8 +19,10 @@ import java.util.concurrent.Future;
 /**
  * Fluent builder API for composing and executing validation pipelines.
  *
- * <p>Supports parallel execution of independent validators using virtual threads
- * on Java 21+ with automatic fallback to platform threads on older versions.</p>
+ * <p>
+ * Supports parallel execution of independent validators using virtual threads
+ * on Java 21+ with automatic fallback to platform threads on older versions.
+ * </p>
  */
 public final class ValidationPipeline {
 
@@ -58,14 +61,16 @@ public final class ValidationPipeline {
      * Creates a standard validation pipeline with all default validators.
      *
      * @return a pipeline with MessageValidator, RemittanceValidator,
-     *         TransactionValidator, and ControlSumValidator
+     *         TransactionValidator, ControlSumValidator, and
+     *         NumberOfTransactionsValidator
      */
     public static ValidationPipeline standard() {
         return new ValidationPipeline()
                 .add(new MessageValidator())
                 .add(new RemittanceValidator())
                 .add(new TransactionValidator())
-                .add(new ControlSumValidator());
+                .add(new ControlSumValidator())
+                .add(new NumberOfTransactionsValidator());
     }
 
     /**

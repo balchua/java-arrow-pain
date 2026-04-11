@@ -171,7 +171,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx8g" \
 
 > Types A–C, F, G (~516 MB – 2.9 GB) are not committed to the repo.
 > They are generated on first test run by `TestFileGenerator.generateIfAbsent()`.
-> Types D–E, H–J are small (< 2 MB) and generated automatically by `mvn test`.
+> Types D–E are small (< 110 KB) and Types H–J are small (< 2 MB); all generated automatically by `mvn test`.
 > All XML files are generated into `test-data/sample-data/` at the project root (shared by all modules).
 
 ---

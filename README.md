@@ -420,7 +420,7 @@ When tests run, benchmark output is printed directly to the console (not redirec
 | J | `pain001_type_j_1x1.xml` | Unitary | 1 | 1 | 1 | Unitary baseline |
 
 > Types A–C, F, G are large files (~516 MB – 2.9 GB) not committed to the repo; generated on first test run.
-> Types D–E, H–J are small (< 2 MB) and generated automatically by `mvn test`.
+> Types D–E are small (< 110 KB) and Types H–J are small (< 2 MB); all generated automatically by `mvn test`.
 
 ---
 

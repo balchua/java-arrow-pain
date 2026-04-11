@@ -19,6 +19,7 @@
     <modules>
         <module>pgw-domain</module>
         <module>pgw-common</module>
+        <module>pgw-duckdb-helper</module>
         <module>pgw-ingestor-pure-arrow</module>
         <module>pgw-ingestor</module>
         <module>pgw-validator-pure-arrow</module>

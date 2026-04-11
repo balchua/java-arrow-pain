@@ -22,10 +22,10 @@
     </description>
 
     <dependencies>
-        <!-- Ingestor module — provides Arrow tables, DAL, and ingestion domain models -->
+        <!-- DuckDB helper — provides ArrowIpc, DuckDbFactory, StreamingBatchConsumer -->
         <dependency>
             <groupId>com.pgw</groupId>
-            <artifactId>pgw-ingestor</artifactId>
+            <artifactId>pgw-duckdb-helper</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -41,7 +41,7 @@
             <artifactId>pgw-domain</artifactId>
         </dependency>
 
-        <!-- Logging API (transitive from pgw-ingestor but declared explicitly) -->
+        <!-- Logging API -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
@@ -79,7 +79,7 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- arrow-c-data — test-scoped: for ValidatorComparisonBenchmarkTest -->
+        <!-- arrow-c-data — transitive from pgw-duckdb-helper; explicit test-scope for ValidatorComparisonBenchmarkTest -->
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-c-data</artifactId>

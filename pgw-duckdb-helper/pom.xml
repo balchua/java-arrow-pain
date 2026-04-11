@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.pgw</groupId>
+        <artifactId>pain001-arrow-loader</artifactId>
+        <version>1.0.0</version>
+    </parent>
+
+    <artifactId>pgw-duckdb-helper</artifactId>
+    <packaging>jar</packaging>
+
+    <name>PGW DuckDB Helper — Shared DuckDB + Arrow C Data Utilities</name>
+    <description>
+        Shared DuckDB infrastructure used by pgw-ingestor and pgw-validator:
+        ArrowIpc (zero-copy Arrow C Data export/import), DuckDbFactory (in-process
+        connection factory), and StreamingBatchConsumer (Arrow→DuckDB batch writer).
+        No domain dependency; depends on pgw-common for the BatchConsumer interface.
+    </description>
+
+    <dependencies>
+        <!-- Shared Arrow infrastructure (BatchConsumer interface, schema, parser) -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow off-heap allocator -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-unsafe</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow column vectors + IPC reader/writer -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+        </dependency>
+
+        <!-- Apache Arrow C Data Interface — zero-copy Arrow↔DuckDB registration -->
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
+        </dependency>
+
+        <!-- DuckDB JDBC driver for in-process SQL query engine -->
+        <dependency>
+            <groupId>org.duckdb</groupId>
+            <artifactId>duckdb_jdbc</artifactId>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+    </dependencies>
+</project>

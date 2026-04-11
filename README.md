@@ -1,6 +1,6 @@
 # PGW — ISO 20022 pain.001 → Apache Arrow + DuckDB Loader
 
-📊 See [Test Results & Benchmark Report](TEST_RESULTS.md) for detailed performance data, test outcomes, and the DuckDB vs Pure-Arrow pipeline comparison.
+📊 See [Ingestion Benchmark Results](INGESTOR_BENCHMARK_RESULTS.md) and [Validator Benchmark Results](VALIDATOR_BENCHMARK_RESULTS.md) for detailed performance data, test outcomes, and the DuckDB vs Pure-Arrow pipeline comparisons.
 
 A study project that parses ISO 20022 **pain.001.001.09** (CustomerCreditTransferInitiation) XML files
 into **Apache Arrow** columnar in-memory tables using a streaming StAX parser — with no DOM, no JAXB,
@@ -307,7 +307,7 @@ directly into Arrow IPC stream files via `ArrowStreamWriter`. This eliminates th
 INSERT round-trip and Arrow→DuckDB→Arrow overhead, making ingest significantly faster for
 scenarios where downstream DuckDB access is not needed at ingest time.
 
-See [TEST_RESULTS.md](TEST_RESULTS.md#duckdb-vs-pure-arrow-pipeline-comparison) for a
+See [INGESTOR_BENCHMARK_RESULTS.md](INGESTOR_BENCHMARK_RESULTS.md#duckdb-vs-pure-arrow-pipeline-comparison) for a
 side-by-side performance comparison of both pipelines across Types A–J.
 
 
@@ -535,11 +535,14 @@ Producer App                          Consumer App A
 
 ## Performance Results
 
-See [TEST_RESULTS.md](TEST_RESULTS.md) for the full benchmark report including:
+See [INGESTOR_BENCHMARK_RESULTS.md](INGESTOR_BENCHMARK_RESULTS.md) for ingestion benchmark results including:
 - **DuckDB pipeline benchmarks** — all 10 types A–J (parse+insert ms, export ms, peak off-heap)
 - **Pure-Arrow pipeline benchmarks** — all 10 types A–J (parse ms, peak off-heap)
 - **Ingest side-by-side comparison** — DuckDB total vs Pure-Arrow, with speedup ratio per type
-- Arrow IPC Stream → DuckDB downstream load times (via `ArrowIpc.load()` — no extension)
+
+See [VALIDATOR_BENCHMARK_RESULTS.md](VALIDATOR_BENCHMARK_RESULTS.md) for validation benchmark results including:
+- Arrow IPC Stream → DuckDB downstream load times (via `ArrowIpc.load()` — no extension) — all 10 types A–J
+- **DuckDB SQL validation benchmark** — DuckDB load ms + SQL validation ms separated (Types A–J)
 - **Pure-Arrow validation benchmark** — Arrow load ms + Java validation ms separated (Types A–J)
 - **DuckDB SQL vs pure-Arrow Java validation comparison** — same `ValidationPipeline`, different DAL backend
 - Memory leak verification: 50-iteration stress test, 0 bytes leaked

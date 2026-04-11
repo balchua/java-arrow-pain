@@ -23,7 +23,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Arrow file to DuckDB load benchmark test - all file types A through E.
+ * Arrow file to DuckDB load benchmark test - all file types A through J.
  *
  * <p>For each type, this test:</p>
  * <ol>
@@ -63,7 +63,7 @@ class ArrowFileLoadBenchmarkTest {
     }
 
     @Test
-    @DisplayName("Arrow file to DuckDB load benchmark - all types A through G")
+    @DisplayName("Arrow file to DuckDB load benchmark - all types A through J")
     void arrowIpcLoadBenchmarkAllTypes() throws Exception {
         List<BenchmarkResult> results = new ArrayList<>();
 
@@ -74,6 +74,9 @@ class ArrowFileLoadBenchmarkTest {
         results.add(runBenchmark(TestPainFileSpecs.TYPE_E, SMALL_ALLOCATOR_LIMIT));
         results.add(runBenchmark(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
         results.add(runBenchmark(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
+        results.add(runBenchmark(TestPainFileSpecs.TYPE_H, SMALL_ALLOCATOR_LIMIT));
+        results.add(runBenchmark(TestPainFileSpecs.TYPE_I, SMALL_ALLOCATOR_LIMIT));
+        results.add(runBenchmark(TestPainFileSpecs.TYPE_J, SMALL_ALLOCATOR_LIMIT));
 
         printBenchmarkReport(results);
 
@@ -84,6 +87,9 @@ class ArrowFileLoadBenchmarkTest {
         assertRowCounts(results.get(4), 2L,         200L);        // Type E
         assertRowCounts(results.get(5), 1L,         2_000_000L); // Type F
         assertRowCounts(results.get(6), 1L,         4_000_000L); // Type G
+        assertRowCounts(results.get(7), 10L,        2_000L);      // Type H
+        assertRowCounts(results.get(8), 5L,         2_000L);      // Type I
+        assertRowCounts(results.get(9), 1L,         1L);          // Type J
     }
 
     private static void assertRowCounts(BenchmarkResult r,

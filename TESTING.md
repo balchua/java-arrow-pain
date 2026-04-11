@@ -201,9 +201,14 @@ diff -u $BASELINE $AFTER | grep -E "^[+-].*ms|Validation|Benchmark|Speedup"
 
 ---
 
-## Updating TEST_RESULTS.md
+## Updating Benchmark Result Files
 
-After running benchmarks, add a new section to [TEST_RESULTS.md](TEST_RESULTS.md):
+After running benchmarks, update the relevant result file:
+
+- **Ingestion benchmarks** → [INGESTOR_BENCHMARK_RESULTS.md](INGESTOR_BENCHMARK_RESULTS.md)
+- **Validation benchmarks** → [VALIDATOR_BENCHMARK_RESULTS.md](VALIDATOR_BENCHMARK_RESULTS.md)
+
+Example format for a new section:
 
 ```markdown
 ## Test Run: YYYY-MM-DD

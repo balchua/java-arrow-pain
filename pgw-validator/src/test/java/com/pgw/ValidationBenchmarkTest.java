@@ -26,7 +26,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Validation-stage benchmark for all file types A through E.
+ * Validation-stage benchmark for all file types A through J.
  *
  * <p>Each run separates two distinct phases:
  * <ol>
@@ -70,7 +70,7 @@ class ValidationBenchmarkTest {
     ) {}
 
     @Test
-    @DisplayName("Validation stage benchmark — Arrow→DuckDB load + SQL validation — all types A through G")
+    @DisplayName("Validation stage benchmark — Arrow→DuckDB load + SQL validation — all types A through J")
     void validationBenchmarkAllTypes() throws Exception {
         List<ValidationResult> results = new ArrayList<>();
 
@@ -81,6 +81,9 @@ class ValidationBenchmarkTest {
         results.add(runValidation(TestPainFileSpecs.TYPE_E, SMALL_ALLOCATOR_LIMIT));
         results.add(runValidation(TestPainFileSpecs.TYPE_F, XLARGE_ALLOCATOR_LIMIT));
         results.add(runValidation(TestPainFileSpecs.TYPE_G, XLARGE_ALLOCATOR_LIMIT));
+        results.add(runValidation(TestPainFileSpecs.TYPE_H, SMALL_ALLOCATOR_LIMIT));
+        results.add(runValidation(TestPainFileSpecs.TYPE_I, SMALL_ALLOCATOR_LIMIT));
+        results.add(runValidation(TestPainFileSpecs.TYPE_J, SMALL_ALLOCATOR_LIMIT));
 
         printReport(results);
 
@@ -92,6 +95,9 @@ class ValidationBenchmarkTest {
         assertEquals(200L,       results.get(4).transactionRows(), "Type E: expected 200 tx rows");
         assertEquals(2_000_000L, results.get(5).transactionRows(), "Type F: expected 2M tx rows");
         assertEquals(4_000_000L, results.get(6).transactionRows(), "Type G: expected 4M tx rows");
+        assertEquals(2_000L,     results.get(7).transactionRows(), "Type H: expected 2000 tx rows");
+        assertEquals(2_000L,     results.get(8).transactionRows(), "Type I: expected 2000 tx rows");
+        assertEquals(1L,         results.get(9).transactionRows(), "Type J: expected 1 tx row");
 
         assertTrue(results.get(3).passed(),  "Type D should pass validation");
         assertFalse(results.get(4).passed(), "Type E should fail validation (invalid CtrlSum)");
@@ -290,7 +296,7 @@ class ValidationBenchmarkTest {
         System.out.println("  Streaming ms   = time for StreamingTransactionIteratorValidator to iterate all rows and");
         System.out.println("                   map each into a Transaction POJO, checking instructedAmount > 0");
         System.out.println("  rows/ms (str)  = transaction row streaming throughput (query + result fetch + object mapping + check)");
-        System.out.printf("%n  ► Grand Total Streaming Time (all types A–G): %,d ms to iterate through %,d transaction rows%n",
+        System.out.printf("%n  ► Grand Total Streaming Time (all types A–J): %,d ms to iterate through %,d transaction rows%n",
                 totalStreamMs, totalStreamRows);
         System.out.println();
     }

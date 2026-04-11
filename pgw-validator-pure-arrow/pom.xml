@@ -24,14 +24,13 @@
     </description>
 
     <dependencies>
-        <!-- Validation pipeline, PaymentRepository interface, validators, domain models -->
+        <!-- Pure-Java domain layer (VOs, exceptions, models) -->
         <dependency>
             <groupId>com.pgw</groupId>
-            <artifactId>pgw-validator</artifactId>
-            <version>${project.version}</version>
+            <artifactId>pgw-domain</artifactId>
         </dependency>
 
-        <!-- Shared Arrow infrastructure (Pain001ArrowSchema field constants) -->
+        <!-- Shared Arrow infrastructure (Pain001ArrowSchema field constants, validation pipeline) -->
         <dependency>
             <groupId>com.pgw</groupId>
             <artifactId>pgw-common</artifactId>
@@ -80,27 +79,6 @@
             <artifactId>pgw-common</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- pgw-ingestor test-jar — provides TestFileGenerator, TestPainFileSpecs -->
-        <dependency>
-            <groupId>com.pgw</groupId>
-            <artifactId>pgw-ingestor</artifactId>
-            <version>${project.version}</version>
-            <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- DuckDB + Arrow C Data — test-scoped for ValidatorComparisonBenchmarkTest -->
-        <dependency>
-            <groupId>org.duckdb</groupId>
-            <artifactId>duckdb_jdbc</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.arrow</groupId>
-            <artifactId>arrow-c-data</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

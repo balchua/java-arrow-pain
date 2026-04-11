@@ -21,34 +21,17 @@
     </description>
 
     <dependencies>
+        <!-- DuckDB helper — provides ArrowIpc, DuckDbFactory, StreamingBatchConsumer -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-duckdb-helper</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Shared Arrow infrastructure (schema, parser, generator, benchmark) -->
         <dependency>
             <groupId>com.pgw</groupId>
             <artifactId>pgw-common</artifactId>
-        </dependency>
-
-        <!-- Apache Arrow off-heap allocator -->
-        <dependency>
-            <groupId>org.apache.arrow</groupId>
-            <artifactId>arrow-memory-unsafe</artifactId>
-        </dependency>
-
-        <!-- Apache Arrow column vectors -->
-        <dependency>
-            <groupId>org.apache.arrow</groupId>
-            <artifactId>arrow-vector</artifactId>
-        </dependency>
-
-        <!-- Apache Arrow C Data Interface — zero-copy Arrow→DuckDB registration -->
-        <dependency>
-            <groupId>org.apache.arrow</groupId>
-            <artifactId>arrow-c-data</artifactId>
-        </dependency>
-
-        <!-- DuckDB JDBC driver for in-process SQL query engine -->
-        <dependency>
-            <groupId>org.duckdb</groupId>
-            <artifactId>duckdb_jdbc</artifactId>
         </dependency>
 
         <!-- Logging API -->
@@ -65,6 +48,15 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- pgw-common test-jar — provides TestFileGenerator, TestPainFileSpecs -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-common</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
     </dependencies>

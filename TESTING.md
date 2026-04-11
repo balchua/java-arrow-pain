@@ -19,29 +19,35 @@ Results are saved to `test-results/test_run_YYYYMMDD_HHMMSS.log`.
 
 ```
 pain001-arrow-loader/        ← parent POM
-├── pgw-common/              ← shared Arrow infrastructure (parser, schema, generator, benchmark)
-│   └── src/test/java/com/pgw/generator/
-│       ├── TestPainFileSpecs.java    # type constants A–G
-│       └── TestFileGenerator.java   # generate-if-absent + tail-check
 ├── pgw-domain/              ← pure-Java domain (VOs, exceptions, models) — no tests
+├── pgw-common/              ← shared Arrow infrastructure (parser, schema, generator, benchmark,
+│   │                           PaymentRepository interface, ValidationPipeline, validators)
+│   └── src/test/java/com/pgw/generator/
+│       ├── TestPainFileSpecs.java    # type constants A–J (canonical, shared via test-jar)
+│       └── TestFileGenerator.java   # generate-if-absent + tail-check
+├── pgw-duckdb-helper/       ← shared DuckDB + Arrow utilities (ArrowIpc, DuckDbFactory,
+│                               StreamingBatchConsumer) — no tests
 ├── pgw-ingestor/            ← XML → DuckDB → Arrow IPC
 │   └── src/test/java/com/pgw/
 │       ├── ParsePipelineTest.java         # StAX parser correctness
 │       ├── StreamingPipelineTest.java     # streaming memory, DuckDB counts, ArrowIpc round-trip
 │       ├── MemoryLeakVerificationTest.java # 50-iteration leak check (0 bytes leaked)
-│       └── IngestionBenchmarkTest.java    # DuckDB ingest benchmark, Types A–G
+│       └── IngestionBenchmarkTest.java    # DuckDB ingest benchmark, Types A–J
 ├── pgw-ingestor-pure-arrow/ ← XML → Arrow IPC only (no DuckDB at ingest time)
 │   └── src/test/java/com/pgw/purearrow/
 │       ├── PureArrowParsePipelineTest.java        # correctness: Types D & E
 │       ├── PureArrowStreamingPipelineTest.java    # memory, row counts, IPC round-trip
 │       ├── PureArrowMemoryLeakVerificationTest.java # 50-iteration leak check (0 bytes)
-│       ├── PureArrowIngestionBenchmarkTest.java   # pure-Arrow benchmark, Types A–G
-│       └── PipelineComparisonBenchmarkTest.java   # DuckDB vs Pure Arrow, Types A–G
-└── pgw-validator/           ← validation domain + App + downstream tests
-    └── src/test/java/com/pgw/
-        ├── ValidationTest.java             # Type D passes, Type E fails correctly
-        ├── ArrowFileLoadBenchmarkTest.java # .arrow → DuckDB load speed, all types
-        └── ValidationBenchmarkTest.java    # load + SQL validation separated, all types
+│       └── PureArrowIngestionBenchmarkTest.java   # pure-Arrow benchmark, Types A–J
+├── pgw-validator/           ← DuckDB-backed PaymentRepositoryImpl + App + downstream tests
+│   └── src/test/java/com/pgw/
+│       ├── ValidationTest.java             # Type D passes, Type E fails correctly
+│       ├── ArrowFileLoadBenchmarkTest.java # .arrow → DuckDB load speed, Types A–J
+│       └── ValidationBenchmarkTest.java    # load + SQL validation separated, Types A–J
+└── pgw-validator-pure-arrow/ ← pure-Arrow validation (no DuckDB)
+    └── src/test/java/com/pgw/purearrow/validator/
+        ├── ArrowValidationTest.java          # Types D, E, H, J correctness
+        └── ArrowValidationBenchmarkTest.java # XML→Arrow + Arrow load + Java validation, Types A–J
 ```
 
 ---
@@ -54,7 +60,7 @@ pain001-arrow-loader/        ← parent POM
 export JAVA_HOME=/usr/lib/jvm/temurin-25-jdk-amd64
 export PATH=$JAVA_HOME/bin:$PATH
 
-# Build and install all 5 modules
+# Build and install all 8 modules
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn clean install -DskipTests
 ```
@@ -77,13 +83,17 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx2g" \
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor
 
-# pgw-ingestor-pure-arrow (pure-Arrow pipeline + comparison benchmark)
+# pgw-ingestor-pure-arrow (pure-Arrow pipeline + benchmark)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor-pure-arrow
 
 # pgw-validator (domain validation + downstream load/validation benchmarks)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-validator
+
+# pgw-validator-pure-arrow (pure-Arrow validation correctness + benchmark)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx8g" \
+  mvn test -pl pgw-validator-pure-arrow
 ```
 
 ### Run a specific test class
@@ -101,7 +111,7 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor -Dtest=MemoryLeakVerificationTest
 
-# DuckDB pipeline: ingestion benchmark (Types A–G)
+# DuckDB pipeline: ingestion benchmark (Types A–J)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor -Dtest=IngestionBenchmarkTest
 
@@ -117,13 +127,9 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
   mvn test -pl pgw-ingestor-pure-arrow -Dtest=PureArrowMemoryLeakVerificationTest
 
-# Pure-Arrow pipeline: benchmark (Types A–G, no DuckDB)
+# Pure-Arrow pipeline: benchmark (Types A–J, no DuckDB)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-ingestor-pure-arrow -Dtest=PureArrowIngestionBenchmarkTest
-
-# *** DuckDB vs Pure Arrow side-by-side comparison ***
-MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
-  mvn test -pl pgw-ingestor-pure-arrow -Dtest=PipelineComparisonBenchmarkTest
 
 # Validation correctness (Type D passes, Type E fails correctly)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
@@ -136,6 +142,14 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 # Validation stage benchmark (load + SQL validation separated)
 MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
   mvn test -pl pgw-validator -Dtest=ValidationBenchmarkTest
+
+# Pure-Arrow validation correctness (Types D, E, H, J)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
+  mvn test -pl pgw-validator-pure-arrow -Dtest=ArrowValidationTest
+
+# Pure-Arrow validation benchmark (XML→Arrow + Arrow load + Java validation, Types A–J)
+MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx8g" \
+  mvn test -pl pgw-validator-pure-arrow -Dtest=ArrowValidationBenchmarkTest
 ```
 
 ---
@@ -151,10 +165,14 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED -Xmx4g" \
 | E | `pain001_type_e_2x100_invalid_ctrlsum.xml` | 2 | 100 | 200 | Invalid control sum — negative test |
 | F | `pain001_type_f_1x2M.xml` | 1 | 2,000,000 | 2,000,000 | Large-scale benchmark |
 | G | `pain001_type_g_1x4M.xml` | 1 | 4,000,000 | 4,000,000 | Extreme-scale benchmark |
+| H | `pain001_type_h_10x200.xml` | 10 | 200 | 2,000 | Multi-remittance correctness |
+| I | `pain001_type_i_5x400.xml` | 5 | 400 | 2,000 | Multi-remittance variant |
+| J | `pain001_type_j_1x1.xml` | 1 | 1 | 1 | Unitary baseline |
 
 > Types A–C, F, G (~516 MB – 2.9 GB) are not committed to the repo.
 > They are generated on first test run by `TestFileGenerator.generateIfAbsent()`.
-> Types D–E are small (<110 KB) and generated automatically by `mvn test`.
+> Types D–E are small (< 110 KB) and Types H–J are small (< 2 MB); all generated automatically by `mvn test`.
+> All XML files are generated into `test-data/sample-data/` at the project root (shared by all modules).
 
 ---
 
@@ -192,18 +210,23 @@ diff -u $BASELINE $AFTER | grep -E "^[+-].*ms|Validation|Benchmark|Speedup"
 |--------|-------|---------|
 | DuckDB parse+insert throughput | `IngestionBenchmarkTest` | `15,843 ms for 1M rows` |
 | Pure-Arrow parse throughput | `PureArrowIngestionBenchmarkTest` | `3,421 ms for 1M rows` |
-| Speedup (Pure Arrow vs DuckDB) | `PipelineComparisonBenchmarkTest` | `4.80×` |
 | Peak off-heap (DuckDB path) | `IngestionBenchmarkTest` | `~31 MB` |
 | Peak off-heap (pure-Arrow path) | `PureArrowIngestionBenchmarkTest` | `~31 MB` |
 | Memory leak | `*MemoryLeakVerificationTest` | `0 bytes leaked` |
 | Validation time | `ValidationBenchmarkTest` | `80 ms for 1M rows` |
 | DuckDB load time | `ArrowFileLoadBenchmarkTest` | `635 ms for 1M rows` |
+| Pure-Arrow load + validate time | `ArrowValidationBenchmarkTest` | `67 ms load / 2,929 ms validate` |
 
 ---
 
-## Updating TEST_RESULTS.md
+## Updating Benchmark Result Files
 
-After running benchmarks, add a new section to [TEST_RESULTS.md](TEST_RESULTS.md):
+After running benchmarks, update the relevant result file:
+
+- **Ingestion benchmarks** → [INGESTOR_BENCHMARK_RESULTS.md](INGESTOR_BENCHMARK_RESULTS.md)
+- **Validation benchmarks** → [VALIDATOR_BENCHMARK_RESULTS.md](VALIDATOR_BENCHMARK_RESULTS.md)
+
+Example format for a new section:
 
 ```markdown
 ## Test Run: YYYY-MM-DD
@@ -260,6 +283,6 @@ MAVEN_OPTS="--add-opens=java.base/java.nio=ALL-UNNAMED" \
 
 ---
 
-**Last Updated:** 2026-04-10
-**Architecture:** Multi-module Maven (5 modules: `pgw-common`, `pgw-domain`, `pgw-ingestor`, `pgw-ingestor-pure-arrow`, `pgw-validator`)
+**Last Updated:** 2026-04-11
+**Architecture:** Multi-module Maven (8 modules: `pgw-domain`, `pgw-common`, `pgw-duckdb-helper`, `pgw-ingestor`, `pgw-ingestor-pure-arrow`, `pgw-validator`, `pgw-validator-pure-arrow`)
 **Package root:** `com.pgw`

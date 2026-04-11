@@ -13,10 +13,17 @@
     <name>PGW Common — Shared Arrow Infrastructure (parser, schema, benchmark, generator)</name>
     <description>
         Shared infrastructure used by all PGW modules: Arrow schema definition,
-        benchmark utility, StAX parser interfaces and implementation, and XML generator.
+        benchmark utility, StAX parser interfaces and implementation, XML generator,
+        validation pipeline, PaymentRepository interface, validators, and domain services.
         No DuckDB dependency.
     </description>
     <dependencies>
+        <!-- Domain models, VOs, exceptions used by PaymentRepository and validators -->
+        <dependency>
+            <groupId>com.pgw</groupId>
+            <artifactId>pgw-domain</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory-unsafe</artifactId>

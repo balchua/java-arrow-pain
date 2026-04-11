@@ -36,7 +36,7 @@ class PureArrowIngestionBenchmarkTest {
     private static final long LARGE_ALLOCATOR_LIMIT  = 2L * 1024 * 1024 * 1024L; //  2 GB
     private static final long XLARGE_ALLOCATOR_LIMIT = 4L * 1024 * 1024 * 1024L; //  4 GB
 
-    private static final Path OUTPUT_DIR = Paths.get("target", "pure-arrow-test-output", "benchmark");
+    private static final Path OUTPUT_DIR = Paths.get("..", "test-data", "output", "ingestor-pure-arrow", "benchmark");
 
     private static final List<BenchmarkResult> RESULTS = new ArrayList<>();
 

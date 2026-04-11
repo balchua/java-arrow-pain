@@ -1,11 +1,9 @@
 package com.pgw.purearrow.validator.dal;
 
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowStreamReader;
-import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
-import org.apache.arrow.vector.VectorLoader;
-import org.apache.arrow.vector.VectorUnloader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,9 +34,10 @@ public final class ArrowTableLoader {
     /**
      * Loads all record batches from the Arrow IPC stream file at {@code path}.
      *
-     * <p>Each returned {@link VectorSchemaRoot} is a deep copy of a single batch;
-     * its off-heap buffers are allocated from {@code allocator}. The caller MUST
-     * close every root when done to avoid off-heap memory leaks.</p>
+     * <p>Each returned {@link VectorSchemaRoot} owns its off-heap buffers via a zero-copy
+     * {@link org.apache.arrow.vector.util.TransferPair#transfer()} from the reader's internal
+     * root — no data bytes are copied.  The caller MUST close every root when done to avoid
+     * off-heap memory leaks.</p>
      *
      * @param path      Arrow IPC stream file (written by {@code ArrowStreamWriter})
      * @param allocator Arrow buffer allocator — child allocators are NOT created;
@@ -58,15 +57,18 @@ public final class ArrowTableLoader {
                 if (sourceRoot.getRowCount() == 0) {
                     continue;
                 }
-                // Unload the current batch to an ArrowRecordBatch, then load it into
-                // a fresh VectorSchemaRoot so the copy is independent of the reader.
-                VectorUnloader unloader = new VectorUnloader(sourceRoot);
-                try (ArrowRecordBatch recordBatch = unloader.getRecordBatch()) {
-                    VectorSchemaRoot copy =
-                            VectorSchemaRoot.create(sourceRoot.getSchema(), allocator);
-                    new VectorLoader(copy).load(recordBatch);
-                    batches.add(copy);
+                // Transfer the reader's buffers directly into a fresh VectorSchemaRoot.
+                // TransferPair.transfer() moves ownership of each off-heap ArrowBuf from
+                // the source vector to the destination — zero bytes are copied.  The reader
+                // will allocate new buffers for the next batch on the next loadNextBatch()
+                // call, so the transfer is safe here.
+                VectorSchemaRoot copy =
+                        VectorSchemaRoot.create(sourceRoot.getSchema(), allocator);
+                for (FieldVector src : sourceRoot.getFieldVectors()) {
+                    src.makeTransferPair(copy.getVector(src.getName())).transfer();
                 }
+                copy.setRowCount(sourceRoot.getRowCount());
+                batches.add(copy);
             }
         }
         LOG.debug("Loaded {} batch(es) from {}", batches.size(), path.getFileName());

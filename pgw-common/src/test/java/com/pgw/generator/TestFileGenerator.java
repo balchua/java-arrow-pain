@@ -15,7 +15,7 @@ import java.nio.file.Paths;
 public final class TestFileGenerator {
 
     public static final Path SAMPLE_DATA_DIR =
-            Paths.get("src", "test", "resources", "sample-data");
+            Paths.get("..", "test-data", "sample-data");
 
     private TestFileGenerator() {}
 

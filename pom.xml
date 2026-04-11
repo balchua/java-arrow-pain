@@ -17,12 +17,13 @@
     </description>
 
     <modules>
-        <module>pgw-common</module>
         <module>pgw-domain</module>
-        <module>pgw-ingestor</module>
+        <module>pgw-common</module>
+        <module>pgw-duckdb-helper</module>
         <module>pgw-ingestor-pure-arrow</module>
-        <module>pgw-validator</module>
+        <module>pgw-ingestor</module>
         <module>pgw-validator-pure-arrow</module>
+        <module>pgw-validator</module>
     </modules>
 
     <properties>

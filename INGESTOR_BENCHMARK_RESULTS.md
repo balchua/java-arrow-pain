@@ -69,7 +69,7 @@ pgw-ingestor  :  12 tests — BUILD SUCCESS
 
 ## `pgw-ingestor` — XML → DuckDB INSERT → Arrow Export Benchmark (`IngestionBenchmarkTest`)
 
-Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
+Results from actual test run (2026-04-11, Java 25 Temurin 25.0.2, `-Xmx8g`):
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -77,18 +77,18 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
 ║  Type    ║ XML (MB) ║ Parse+Ins ms ║ Export ms  ║ Peak Off-Heap  ║ Arrow (MB) ║  Tx Rows  ║
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
-║  Type A  ║   734.4  ║      15,758  ║       987  ║   31,309,824   ║    294.64 ║ 1,000,000 ║
-║  Type B  ║   734.3  ║      14,317  ║       788  ║   31,309,824   ║    294.54 ║ 1,000,000 ║
-║  Type C  ║ 1,295.1  ║      31,058  ║     1,110  ║   52,101,120   ║    494.90 ║ 1,000,000 ║
-║  Type D  ║     0.1  ║          16  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
-║  Type E  ║     0.1  ║          12  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
-║  Type F  ║ 1,469.8  ║      29,716  ║     1,799  ║   31,309,824   ║    590.34 ║ 2,000,000 ║
-║  Type G  ║ 2,940.7  ║      61,294  ║     4,498  ║   31,309,824   ║  1,181.73 ║ 4,000,000 ║
-║  Type H  ║     1.5  ║          30  ║         7  ║    2,080,768   ║      0.59 ║     2,000 ║
-║  Type I  ║     1.5  ║          29  ║         6  ║    2,080,768   ║      0.59 ║     2,000 ║
-║  Type J  ║     0.0  ║           9  ║         4  ║    1,785,856   ║      0.01 ║         1 ║
+║  Type A  ║   734.4  ║      16,196  ║       612  ║   31,309,824   ║    294.64 ║ 1,000,000 ║
+║  Type B  ║   734.3  ║      14,512  ║       557  ║   31,309,824   ║    294.54 ║ 1,000,000 ║
+║  Type C  ║ 1,295.1  ║      30,913  ║       914  ║   52,101,120   ║    494.90 ║ 1,000,000 ║
+║  Type D  ║     0.1  ║          12  ║         5  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type E  ║     0.1  ║          13  ║         4  ║    1,785,856   ║      0.06 ║       200 ║
+║  Type F  ║ 1,469.8  ║      30,588  ║     1,091  ║   31,309,824   ║    590.34 ║ 2,000,000 ║
+║  Type G  ║ 2,940.7  ║      62,249  ║     2,354  ║   31,309,824   ║  1,181.73 ║ 4,000,000 ║
+║  Type H  ║     1.5  ║          31  ║         8  ║    2,080,768   ║      0.59 ║     2,000 ║
+║  Type I  ║     1.5  ║          33  ║         8  ║    2,080,768   ║      0.59 ║     2,000 ║
+║  Type J  ║     0.0  ║           6  ║         4  ║    1,785,856   ║      0.01 ║         1 ║
 ╠══════════╬══════════╬══════════════╬════════════╬════════════════╬════════════╬═══════════╣
-║  TOTAL   ║ 7,177.5  ║     152,239  ║     9,209  ║   52,101,120   ║  2,857.46 ║ 9,004,401 ║
+║  TOTAL   ║ 7,177.5  ║     154,553  ║     5,557  ║   52,101,120   ║  2,857.46 ║ 9,004,401 ║
 ╚══════════╩══════════╩══════════════╩════════════╩════════════════╩════════════╩═══════════╝
 
   XML (MB)       = source XML file size on disk
@@ -105,11 +105,11 @@ Results from actual test run (2026-04-10, Java 25 Temurin 25.0.2, `-Xmx8g`):
   because `StreamingBatchConsumer` feeds each 65k-row batch to DuckDB via `registerArrowStream` and
   immediately releases the Arrow buffer — only 1 batch lives in Arrow memory at any time
 - Type C peaks at ~52 MB because 1M separate remittance batches are processed (one batch per PmtInf)
-- Type G (4M rows) scales linearly with Type F: 61,294 ms vs 29,716 ms
-- DuckDB export is fast (< 4.5 s even for 4M rows) since it reads from DuckDB, not XML
-- **Type H** (10 × 200 = 2,000 tx): 30 ms parse, 7 ms export — multi-remittance correctness baseline
-- **Type I** (5 × 400 = 2,000 tx): 29 ms parse, 6 ms export — same total rows as H, different grouping
-- **Type J** (1 × 1 = 1 tx): 9 ms parse, 4 ms export — **unitary baseline**, minimal XML payload
+- Type G (4M rows) scales linearly with Type F: 62,249 ms vs 30,588 ms
+- DuckDB export is fast (< 2.4 s even for 4M rows) since it reads from DuckDB, not XML
+- **Type H** (10 × 200 = 2,000 tx): 31 ms parse, 8 ms export — multi-remittance correctness baseline
+- **Type I** (5 × 400 = 2,000 tx): 33 ms parse, 8 ms export — same total rows as H, different grouping
+- **Type J** (1 × 1 = 1 tx): 6 ms parse, 4 ms export — **unitary baseline**, minimal XML payload
 
 ## `pgw-ingestor` — Memory Leak Verification (`MemoryLeakVerificationTest`)
 
